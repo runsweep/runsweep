@@ -433,18 +433,25 @@ func (s *scanner) scanRun(ctx context.Context, repo string, run source.Run) ([]m
 		quiet := logErr == nil && !logInstall && len(installs) == 0 && (rj == nil || !rj.InstallsNPM())
 		// A lockfile pin is AFFECTED only for a job that installed (install output in its log or an
 		// install command of its own) from that lockfile: the root one or one in a directory its
-		// steps or log name. A quiet identified job that runs no opaque script (a silent install)
-		// drops the npm evidence; else the pin is POSSIBLE.
+		// steps or log name. A quiet identified job drops the npm evidence when it cannot install
+		// (no package-manager action or script), or when the lockfile lies in a directory it never
+		// names and it runs no opaque script that could change into it; else the pin is POSSIBLE.
+		// Under a base-branch event the head_sha workflow proves nothing: such a pin is UNCHECKED.
+		var keepUnchecked bool
 		if npmJob.Status == model.Affected {
 			installed := logErr == nil && installLog(log) || wj != nil && wj.InstallsNPMStrict()
 			related := slices.ContainsFunc(npmRes.Pinned, func(dir string) bool {
 				return dir == "." || wj != nil && wj.Mentions(dir) || logErr == nil && pathInLog(log, dir)
 			})
 			drop := (!installed || !related) && quiet && wj != nil && !wj.MayInstallNPM() && !baseEvent
+			unrelated := !related && quiet && wj != nil && !wj.RunsOpaque()
 			switch {
 			case installed && related:
-			case drop: // the rest of the tree would be dropped below too: the job cannot install
+			case drop || unrelated && !baseEvent: // the rest of the tree would be dropped below too: the job cannot install
 				npmJob = npm.Result{}
+			case unrelated:
+				npmJob.Status, keepUnchecked = model.Unchecked, true
+				npmJob.Evidence = append(npmJob.Evidence, note("lockfile in %s pins a bad version; the job names no such directory", strings.Join(npmRes.Pinned, ", ")))
 			default:
 				npmJob.Status = model.Possible
 				switch {
@@ -469,7 +476,7 @@ func (s *scanner) scanRun(ctx context.Context, repo string, run source.Run) ([]m
 			npmJob.Evidence = append(npmJob.Evidence, note("lockfile read at head_sha; the run used the base branch"))
 		}
 		// A missing or unreadable lockfile matters only to a job that installed: dropped when quiet.
-		noInstall := quiet && npmJob.Status == model.Unchecked
+		noInstall := quiet && npmJob.Status == model.Unchecked && !keepUnchecked
 		// Otherwise drop npm evidence only on positive evidence the job cannot install packages.
 		if npmJob.Status > model.Clean && !noInstall && (wj == nil || wj.MayInstallNPM() || logInstall || baseEvent) {
 			f.Status = model.Worse(f.Status, npmJob.Status)

@@ -1366,6 +1366,23 @@ func TestScanLockfileNeedsInstall(t *testing.T) {
 	if fd.Status != model.Possible {
 		t.Fatalf("substring: %+v", fd)
 	}
+	// a quiet job whose steps and log never name the lockfile's directory: its actions cannot
+	// install from there, so the pin is dropped
+	res, err := Run(context.Background(), fx(action, "web/package-lock.json", "2026-03-31T01:00:00Z CLA ok\n", false), npmOnly, Options{Repos: []string{"o/a"}})
+	if err != nil || len(res.Findings) != 0 {
+		t.Fatalf("unrelated lockfile: %+v %v", res.Findings, err)
+	}
+	// ...unless it runs a script that may change into that directory
+	fd = scanOne(t, fx("      - run: ./build.sh\n", "web/package-lock.json", "2026-03-31T01:00:00Z build ok\n", false), npmOnly)
+	if fd.Status != model.Possible || !hasNote(fd, "job runs scripts that may install silently") {
+		t.Fatalf("unrelated lockfile, opaque script: %+v", fd)
+	}
+	// ...or the run used the base branch: the head_sha workflow proves nothing
+	f = fx(action, "web/package-lock.json", "2026-03-31T01:00:00Z CLA ok\n", false)
+	f.Runs["o/a"][0].Event = "pull_request_target"
+	if fd := scanOne(t, f, npmOnly); fd.Status != model.Unchecked || !hasNote(fd, "lockfile in web pins a bad version; the job names no such directory") {
+		t.Fatalf("unrelated lockfile, base event: %+v", fd)
+	}
 	// installed from the lockfile's directory
 	for name, f := range map[string]*sourcetest.Fake{
 		"root lockfile, log":           fx(action, "package-lock.json", install, false),
