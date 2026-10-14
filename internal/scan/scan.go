@@ -434,10 +434,9 @@ func (s *scanner) scanRun(ctx context.Context, repo string, run source.Run) ([]m
 		// A lockfile pin is AFFECTED only for a job that installed (install output in its log or an
 		// install command of its own) from that lockfile: the root one or one in a directory its
 		// steps or log name. A quiet identified job drops the npm evidence when it cannot install
-		// (no package-manager action or script), or when the lockfile lies in a directory it never
-		// names and it runs no opaque script or local/docker action that could change into it; else
-		// the pin is POSSIBLE.
-		// Under a base-branch event the head_sha workflow proves nothing: such a pin is UNCHECKED.
+		// (no package-manager action or script). A pin in a directory the job never names, with
+		// nothing in the log, is UNCHECKED: a build tool or action may still install silently, but
+		// nothing links the job to it. Else the pin is POSSIBLE.
 		var keepUnchecked bool
 		if npmJob.Status == model.Affected {
 			installed := logErr == nil && installLog(log) || wj != nil && wj.InstallsNPMStrict()
@@ -445,16 +444,17 @@ func (s *scanner) scanRun(ctx context.Context, repo string, run source.Run) ([]m
 				return dir == "." || wj != nil && wj.Mentions(dir) || logErr == nil && pathInLog(log, dir)
 			})
 			drop := (!installed || !related) && quiet && wj != nil && !wj.MayInstallNPM() && !baseEvent
-			// A local or docker action hides its steps from the workflow file: it may change into the directory.
+			// An opaque script, a local or docker:// action hides its steps from the workflow file and
+			// may change into the directory: the pin stays POSSIBLE.
 			unrelated := !related && quiet && wj != nil && !wj.RunsOpaque() && !slices.ContainsFunc(wj.Uses, func(u string) bool {
 				return strings.HasPrefix(u, "./") || strings.HasPrefix(u, "docker://")
 			})
 			switch {
 			case installed && related:
-			case drop || unrelated && !baseEvent: // the rest of the tree would be dropped below too: the job cannot install
+			case drop: // the rest of the tree would be dropped below too: the job cannot install
 				npmJob = npm.Result{}
 			case unrelated:
-				npmJob.Status, keepUnchecked = model.Unchecked, true
+				npmJob.Status, keepUnchecked = model.Worse(npmJob.Rest, model.Unchecked), true
 				npmJob.Evidence = append(npmJob.Evidence, note("lockfile in %s pins a bad version; the job names no such directory", strings.Join(npmRes.Pinned, ", ")))
 			default:
 				npmJob.Status = model.Possible

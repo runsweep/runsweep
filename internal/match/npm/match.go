@@ -32,10 +32,14 @@ type Result struct {
 	Unlocked []Unlocked
 	// Pinned: directories of the lockfiles that pin a bad version.
 	Pinned []string
+	// Rest: the status from everything but the pins.
+	Rest model.Status
 }
 
 // mark raises the status for evidence other than a pin.
-func (r *Result) mark(s model.Status) { r.Status = model.Worse(r.Status, s) }
+func (r *Result) mark(s model.Status) {
+	r.Status, r.Rest = model.Worse(r.Status, s), model.Worse(r.Rest, s)
+}
 
 // Unlocked is a bad package declared in Dir/package.json with no covering lockfile.
 type Unlocked struct {
@@ -45,7 +49,7 @@ type Unlocked struct {
 // Resolve folds r.Unlocked into the status: POSSIBLE where installed(Dir), otherwise UNCHECKED
 // with a note that the job does not seem to install it.
 func (r Result) Resolve(installed func(dir string) bool) Result {
-	out := Result{Status: r.Status, Evidence: slices.Clone(r.Evidence), Pinned: r.Pinned}
+	out := Result{Status: r.Status, Evidence: slices.Clone(r.Evidence), Pinned: r.Pinned, Rest: r.Rest}
 	for _, u := range r.Unlocked {
 		if installed(u.Dir) {
 			out.mark(model.Possible)
@@ -260,7 +264,7 @@ func (c *Cache) Match(ctx context.Context, f Fetcher, repo, sha string, bad []in
 			failedDirs[dir] = true
 		}
 	}
-	if len(r.Pinned) == 0 { // a pin makes the job AFFECTED; package.json files would add nothing
+	{ // read even with a pin: the pin may not be AFFECTED for a job, the rest then decides (Rest)
 		type pkgJSON struct {
 			path, name string
 			names      []string
