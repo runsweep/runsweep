@@ -451,6 +451,9 @@ func (s *scanner) scanRun(ctx context.Context, repo string, run source.Run) ([]m
 			})
 			switch {
 			case installed && related:
+			case drop && wj.RunsBuildTool(): // build hooks print nothing: no proof either way
+				npmJob.Status, keepUnchecked = model.Worse(npmJob.Rest, model.Unchecked), true
+				npmJob.Evidence = append(npmJob.Evidence, note("lockfile pins a bad version; job runs a build tool that may install silently"))
 			case drop: // the rest of the tree would be dropped below too: the job cannot install
 				npmJob = npm.Result{}
 			case unrelated:
@@ -482,7 +485,7 @@ func (s *scanner) scanRun(ctx context.Context, repo string, run source.Run) ([]m
 		// A missing or unreadable lockfile matters only to a job that installed: dropped when quiet.
 		noInstall := quiet && npmJob.Status == model.Unchecked && !keepUnchecked
 		// Otherwise drop npm evidence only on positive evidence the job cannot install packages.
-		if npmJob.Status > model.Clean && !noInstall && (wj == nil || wj.MayInstallNPM() || logInstall || baseEvent) {
+		if npmJob.Status > model.Clean && !noInstall && (wj == nil || wj.MayInstallNPM() || logInstall || baseEvent || keepUnchecked) {
 			f.Status = model.Worse(f.Status, npmJob.Status)
 			f.Evidence = append(f.Evidence, npmJob.Evidence...)
 		}

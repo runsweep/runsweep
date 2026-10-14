@@ -1336,6 +1336,13 @@ func TestScanLockfileNeedsInstall(t *testing.T) {
 	if fd := scanOne(t, rust, npmOnly); fd.Status != model.Possible || !hasNote(fd, "lockfile pins a bad version; job uses actions that may install silently") {
 		t.Fatalf("toolchain only: %+v", fd)
 	}
+	// a build tool may run an install hook silently: a quiet job with one is UNCHECKED, never CLEAN
+	for _, run := range []string{"cargo build", "pip install .", "uv sync", "go generate ./..."} {
+		f := fx("      - uses: actions/checkout@v4\n      - run: "+run+"\n", "package-lock.json", "2026-03-31T01:00:00Z ok\n", false)
+		if fd := scanOne(t, f, npmOnly); fd.Status != model.Unchecked || !hasNote(fd, "job runs a build tool that may install silently") {
+			t.Fatalf("%s: %+v", run, fd)
+		}
+	}
 	// a test step is no install step
 	fd = scanOne(t, fx("      - run: npm test\n", "package-lock.json", "2026-03-31T01:00:00Z > jest\n", false), npmOnly)
 	if fd.Status != model.Possible {

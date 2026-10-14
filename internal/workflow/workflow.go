@@ -93,6 +93,8 @@ var (
 	// opaque runners and scripts that may install npm packages without naming npm in the workflow
 	// (a command word that is a variable, a substitution or eval can be a package manager too)
 	opaqueRe = regexp.MustCompile(`(?:^|[^\w./-])(?:(?:make|task|just|mise|nx|turbo|lerna|rush|corepack|python3?|node|docker(?:-compose)?|podman|buildah|mvnw?|gradlew?|sbt|bazel|dotnet|composer)(?:$|[^\w.-])|(?:ba|z)?sh\s+\S)|(?:^|[\s;&|(])\./[\w-]|\.sh\b|(?m:(?:^|[;&|({]|\b(?:then|do|else)\b)[ \t]*["']?(?:\$|eval\b|` + "`" + `))`)
+	// a build tool whose build hooks (build.rs, a PEP 517 backend, go:generate) may run npm silently
+	buildRe = regexp.MustCompile(`(?:^|[^\w./-])(?:cargo|pip3?|uv|poetry|pdm|hatch|go[ \t]+generate)(?:$|[^\w.-])`)
 	// a package manager command word; runInstalls reads its arguments
 	runtimeRe = regexp.MustCompile(`(?:^|[^\w./-])(npx|pnpx|bunx|npm|pnpm|yarn|bun)((?:\.cmd|\.exe)?)(?:$|[ \t])`)
 	// a github-script that runs a process, which may be a package manager named in a variable
@@ -614,6 +616,9 @@ func (j *Job) MayInstallNPM() bool {
 func (j *Job) RunsOpaque() bool {
 	return slices.ContainsFunc(j.Runs, opaqueRe.MatchString) || slices.ContainsFunc(j.Scripts, scriptExecRe.MatchString)
 }
+
+// RunsBuildTool reports whether a run: step calls a build tool whose hooks may install silently.
+func (j *Job) RunsBuildTool() bool { return slices.ContainsFunc(j.Runs, buildRe.MatchString) }
 
 // Exposure returns everything job j could read. Workflow-level env secrets are included.
 func (w *Workflow) Exposure(j *Job) model.Exposure {
