@@ -186,3 +186,14 @@ func TestUnverifiedPerRepo(t *testing.T) {
 		t.Fatalf("o/b's NPM_TOKEN is another secret: %+v", u)
 	}
 }
+
+// A name is confirmed when any AFFECTED job could read it; POSSIBLE-only names follow in a tier.
+func TestConfirmed(t *testing.T) {
+	f := func(st model.Status, id int64, secrets ...string) model.Finding {
+		return model.Finding{Status: st, Run: model.RunRef{Repo: "o/a", RunID: id, Job: "j"}, Exposure: &model.Exposure{Secrets: secrets}}
+	}
+	got := Plan([]model.Finding{f(model.Possible, 1, "A_TOKEN", "B_TOKEN"), f(model.Affected, 2, "B_TOKEN")})
+	if len(got) != 2 || got[0].Name != "B_TOKEN" || !got[0].Confirmed || got[1].Name != "A_TOKEN" || got[1].Confirmed {
+		t.Fatalf("%+v", got)
+	}
+}

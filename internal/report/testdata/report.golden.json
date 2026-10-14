@@ -81,7 +81,8 @@
           "job_url": "https://github.com/o/app/actions/runs/42/job/7",
           "attempt": 2
         }
-      ]
+      ],
+      "confirmed": true
     },
     {
       "name": "NPM_TOKEN",
@@ -100,7 +101,8 @@
           "job_url": "https://github.com/o/app/actions/runs/42/job/7",
           "attempt": 2
         }
-      ]
+      ],
+      "confirmed": true
     }
   ],
   "unverified_rotation": [
@@ -118,7 +120,8 @@
           "created_at": "0001-01-01T00:00:00Z",
           "job": "publish"
         }
-      ]
+      ],
+      "confirmed": false
     }
   ],
   "skipped": [

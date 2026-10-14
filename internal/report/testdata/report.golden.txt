@@ -5,10 +5,10 @@ AFFECTED 1   POSSIBLE 0   UNCHECKED 1
 
 Rotate first
   Secrets unknown for 1 job (workflow file, job list or run not available); review them manually: o/old#9.
-  1  OIDC token (id-token: write)  1 · cloud
+  1  OIDC token (id-token: write)  1 · cloud · AFFECTED job
      review cloud roles
      seen in: o/app#42 build attempt 2
-  2  NPM_TOKEN                     2 · publish/deploy
+  2  NPM_TOKEN                     2 · publish/deploy · AFFECTED job
      rotate
      seen in: o/app#42 build attempt 2
 

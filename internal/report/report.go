@@ -134,20 +134,20 @@ func mdFindings(b *strings.Builder, r *model.Result) {
 
 	b.WriteString("## Rotate first\n\n")
 	b.WriteString(nothingToRotate(r, "", "\n\n", code))
-	items := func(list []model.RotationItem) {
+	items := func(list []model.RotationItem, plan bool) {
 		if len(list) == 0 {
 			return
 		}
 		b.WriteString("| # | Secret / role | Priority | Why | Seen in |\n|---|---|---|---|---|\n")
 		for i, it := range list {
-			fmt.Fprintf(b, "| %d | %s | %s | %s | %s |\n", i+1, code(it.Name), tier(it.Tier), cell(it.Reason), seenIn(it.Runs, code))
+			fmt.Fprintf(b, "| %d | %s | %s | %s | %s |\n", i+1, code(it.Name), tier(it.Tier)+seenBy(it, plan), cell(it.Reason), seenIn(it.Runs, code))
 		}
 		b.WriteString("\n")
 	}
-	items(r.Rotation)
+	items(r.Rotation, true)
 	if len(r.Unverified) > 0 {
 		b.WriteString("## " + unverifiedTitle + "\n\n")
-		items(r.Unverified)
+		items(r.Unverified, false)
 	}
 
 	b.WriteString("## Findings\n\n")
@@ -234,6 +234,18 @@ func link(text, url string) string {
 		return text
 	}
 	return "[" + text + "](" + url + ")"
+}
+
+// seenBy tells a confirmed rotation item from one only POSSIBLE jobs could read; "" for the
+// Not verified list, where every job is UNCHECKED.
+func seenBy(it model.RotationItem, plan bool) string {
+	switch {
+	case !plan:
+		return ""
+	case it.Confirmed:
+		return " · AFFECTED job"
+	}
+	return " · POSSIBLE jobs only"
 }
 
 func tier(n int) string {
