@@ -871,3 +871,27 @@ func TestSecretRefMustStandAlone(t *testing.T) {
 		t.Errorf("secrets: %v", e.Secrets)
 	}
 }
+
+func TestRunsBuildTool(t *testing.T) {
+	for run, want := range map[string]bool{
+		"cargo build":                  true,
+		"~/.cargo/bin/cargo test":      true,
+		"/usr/bin/cargo build":         true,
+		`C:\cargo\bin\cargo.exe build`: true,
+		"cargo-zigbuild build":         true,
+		"pip3.12 install .":            true,
+		"maturin develop":              true,
+		"wasm-pack build":              true,
+		"go generate ./...":            true,
+		"uv sync":                      true,
+		"uvicorn app:app":              false,
+		"pipx run x":                   false,
+		"pip-audit":                    false,
+		"source ~/.cargo/env":          false,
+		"go build ./...":               false,
+	} {
+		if got := (&Job{Runs: []string{run}}).RunsBuildTool(); got != want {
+			t.Errorf("%q: %v", run, got)
+		}
+	}
+}
