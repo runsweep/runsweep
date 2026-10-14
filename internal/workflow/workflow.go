@@ -95,7 +95,7 @@ var (
 	opaqueRe = regexp.MustCompile(`(?:^|[^\w./-])(?:(?:make|task|just|mise|nx|turbo|lerna|rush|corepack|python3?|node|docker(?:-compose)?|podman|buildah|mvnw?|gradlew?|sbt|bazel|dotnet|composer)(?:$|[^\w.-])|(?:ba|z)?sh\s+\S)|(?:^|[\s;&|(])\./[\w-]|\.sh\b|(?m:(?:^|[;&|({]|\b(?:then|do|else)\b)[ \t]*["']?(?:\$|eval\b|` + "`" + `))`)
 	// a build tool whose build hooks (build.rs, a PEP 517 backend, go:generate) may run npm silently
 	// (a path before it and .exe after it allowed)
-	buildRe = regexp.MustCompile(`(?:^|[^\w./-])(?:[^\s;&|()]*[/\\])?(?:cargo(?:-\w+)?|cross|trunk|maturin|wasm-pack|pip3?(?:\.\d+)?|uv|poetry|pdm|hatch|go[ \t]+generate)(?:\.exe)?(?:$|[\s;&|)])`)
+	buildRe = regexp.MustCompile(`(?:^|[^\w./-])(?:[^\s;&|()]*[/\\])?(?:cargo(?:-\w+)?|cross|trunk|maturin|wasm-pack|pip3?(?:\.\d+)?|uv|poetry|pdm|hatch|go[ \t]+generate)(?:\.exe)?(?:$|[^\w./-])`)
 	// a package manager command word; runInstalls reads its arguments
 	runtimeRe = regexp.MustCompile(`(?:^|[^\w./-])(npx|pnpx|bunx|npm|pnpm|yarn|bun)((?:\.cmd|\.exe)?)(?:$|[ \t])`)
 	// a github-script that runs a process, which may be a package manager named in a variable
