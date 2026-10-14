@@ -435,7 +435,8 @@ func (s *scanner) scanRun(ctx context.Context, repo string, run source.Run) ([]m
 		// install command of its own) from that lockfile: the root one or one in a directory its
 		// steps or log name. A quiet identified job drops the npm evidence when it cannot install
 		// (no package-manager action or script), or when the lockfile lies in a directory it never
-		// names and it runs no opaque script that could change into it; else the pin is POSSIBLE.
+		// names and it runs no opaque script or local/docker action that could change into it; else
+		// the pin is POSSIBLE.
 		// Under a base-branch event the head_sha workflow proves nothing: such a pin is UNCHECKED.
 		var keepUnchecked bool
 		if npmJob.Status == model.Affected {
@@ -444,7 +445,10 @@ func (s *scanner) scanRun(ctx context.Context, repo string, run source.Run) ([]m
 				return dir == "." || wj != nil && wj.Mentions(dir) || logErr == nil && pathInLog(log, dir)
 			})
 			drop := (!installed || !related) && quiet && wj != nil && !wj.MayInstallNPM() && !baseEvent
-			unrelated := !related && quiet && wj != nil && !wj.RunsOpaque()
+			// A local or docker action hides its steps from the workflow file: it may change into the directory.
+			unrelated := !related && quiet && wj != nil && !wj.RunsOpaque() && !slices.ContainsFunc(wj.Uses, func(u string) bool {
+				return strings.HasPrefix(u, "./") || strings.HasPrefix(u, "docker://")
+			})
 			switch {
 			case installed && related:
 			case drop || unrelated && !baseEvent: // the rest of the tree would be dropped below too: the job cannot install

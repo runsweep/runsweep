@@ -1377,6 +1377,11 @@ func TestScanLockfileNeedsInstall(t *testing.T) {
 	if fd.Status != model.Possible || !hasNote(fd, "job runs scripts that may install silently") {
 		t.Fatalf("unrelated lockfile, opaque script: %+v", fd)
 	}
+	// ...or a local action, whose steps the workflow file does not show
+	fd = scanOne(t, fx("      - uses: ./.github/actions/setup\n", "web/package-lock.json", "2026-03-31T01:00:00Z ok\n", false), npmOnly)
+	if fd.Status != model.Possible {
+		t.Fatalf("unrelated lockfile, local action: %+v", fd)
+	}
 	// ...or the run used the base branch: the head_sha workflow proves nothing
 	f = fx(action, "web/package-lock.json", "2026-03-31T01:00:00Z CLA ok\n", false)
 	f.Runs["o/a"][0].Event = "pull_request_target"
