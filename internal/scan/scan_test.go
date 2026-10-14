@@ -1366,11 +1366,22 @@ func TestScanLockfileNeedsInstall(t *testing.T) {
 	if fd.Status != model.Possible {
 		t.Fatalf("substring: %+v", fd)
 	}
-	// a quiet job whose steps and log never name the lockfile's directory: its actions cannot
-	// install from there, so the pin is dropped
-	res, err := Run(context.Background(), fx(action, "web/package-lock.json", "2026-03-31T01:00:00Z CLA ok\n", false), npmOnly, Options{Repos: []string{"o/a"}})
-	if err != nil || len(res.Findings) != 0 {
-		t.Fatalf("unrelated lockfile: %+v %v", res.Findings, err)
+	// a quiet job whose steps and log never name the lockfile's directory: nothing links it to
+	// the pin, but a build tool may install silently, so UNCHECKED, never CLEAN
+	for name, steps := range map[string]string{
+		"action": action,
+		"cargo":  "      - uses: dtolnay/rust-toolchain@stable\n      - run: cargo build\n",
+	} {
+		fd := scanOne(t, fx(steps, "web/package-lock.json", "2026-03-31T01:00:00Z ok\n", false), npmOnly)
+		if fd.Status != model.Unchecked || !hasNote(fd, "lockfile in web pins a bad version; the job names no such directory") {
+			t.Fatalf("unrelated lockfile, %s: %+v", name, fd)
+		}
+	}
+	// the pin's demotion keeps the rest of the tree: a root package.json with no lockfile is POSSIBLE
+	f = fx(action, "web/package-lock.json", "2026-03-31T01:00:00Z ok\n", false)
+	f.AddFile("o/a", "s1", "package.json", []byte(`{"dependencies":{"axios":"^1.14.0"}}`))
+	if fd := scanOne(t, f, npmOnly); fd.Status != model.Possible {
+		t.Fatalf("unrelated pin hid the rest: %+v", fd)
 	}
 	// ...unless it runs a script that may change into that directory
 	fd = scanOne(t, fx("      - run: ./build.sh\n", "web/package-lock.json", "2026-03-31T01:00:00Z build ok\n", false), npmOnly)

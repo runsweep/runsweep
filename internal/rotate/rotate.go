@@ -60,14 +60,17 @@ func Unverified(findings []model.Finding) []model.RotationItem {
 
 func plan(findings []model.Finding, keep func(model.Status) bool) []model.RotationItem {
 	items := map[string]*model.RotationItem{}
-	var affected bool // the finding being added is AFFECTED
+	var affected bool              // the finding being added is AFFECTED
+	confirmed := map[string]bool{} // name + "\x00" + repo: an AFFECTED job there could read it
 	add := func(name string, tier int, reason string, run model.RunRef) {
 		it, ok := items[name]
 		if !ok {
 			it = &model.RotationItem{Name: name, Tier: tier, Reason: reason}
 			items[name] = it
 		}
-		it.Confirmed = it.Confirmed || affected
+		if affected {
+			confirmed[name+"\x00"+run.Repo] = true
+		}
 		if tier < it.Tier {
 			it.Tier, it.Reason = tier, reason
 		}
@@ -128,6 +131,8 @@ func plan(findings []model.Finding, keep func(model.Status) bool) []model.Rotati
 			}
 			return it.Runs[a].Job < it.Runs[b].Job
 		})
+		// a name is per repository (or shared): confirmed only when it is in every repository listed
+		it.Confirmed = !slices.ContainsFunc(it.Runs, func(r model.RunRef) bool { return !confirmed[it.Name+"\x00"+r.Repo] })
 		out = append(out, *it)
 	}
 	sort.Slice(out, func(a, b int) bool {

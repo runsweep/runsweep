@@ -312,8 +312,8 @@ func TestMatchCachesParsedFiles(t *testing.T) {
 			t.Fatalf("%+v %v", r, err)
 		}
 	}
-	if f.n != 1 {
-		t.Fatalf("want the lockfile fetched once (package.json not needed once AFFECTED), got %d fetches", f.n)
+	if f.n != 2 {
+		t.Fatalf("want the lockfile and package.json fetched once each, got %d fetches", f.n)
 	}
 }
 

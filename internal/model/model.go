@@ -88,7 +88,7 @@ type RotationItem struct {
 	Tier   int      `json:"tier"`
 	Reason string   `json:"reason"`
 	Runs   []RunRef `json:"runs"`
-	// Confirmed: an AFFECTED job could read it; else only POSSIBLE (or UNCHECKED) jobs could.
+	// Confirmed: in every repository listed, an AFFECTED job could read it.
 	Confirmed bool `json:"confirmed"`
 }
 

@@ -196,4 +196,10 @@ func TestConfirmed(t *testing.T) {
 	if len(got) != 2 || got[0].Name != "B_TOKEN" || !got[0].Confirmed || got[1].Name != "A_TOKEN" || got[1].Confirmed {
 		t.Fatalf("%+v", got)
 	}
+	// the same name in another repository is another secret: not confirmed by o/a
+	g := f(model.Possible, 3, "B_TOKEN")
+	g.Run.Repo = "o/b"
+	if got := Plan([]model.Finding{f(model.Affected, 2, "B_TOKEN"), g}); got[0].Confirmed {
+		t.Fatalf("other repo: %+v", got)
+	}
 }
