@@ -35,7 +35,8 @@ var reasons = map[int]string{
 	3: "third-party service credentials — rotate",
 }
 
-// Plan builds an ordered secret rotation plan from the AFFECTED and POSSIBLE findings.
+// Plan builds an ordered secret rotation plan from the AFFECTED and POSSIBLE findings: by tier,
+// then confirmed (seen by an AFFECTED job) before POSSIBLE-only, then by name.
 func Plan(findings []model.Finding) []model.RotationItem {
 	return plan(findings, func(s model.Status) bool { return s >= model.Possible })
 }
@@ -59,12 +60,14 @@ func Unverified(findings []model.Finding) []model.RotationItem {
 
 func plan(findings []model.Finding, keep func(model.Status) bool) []model.RotationItem {
 	items := map[string]*model.RotationItem{}
+	var affected bool // the finding being added is AFFECTED
 	add := func(name string, tier int, reason string, run model.RunRef) {
 		it, ok := items[name]
 		if !ok {
 			it = &model.RotationItem{Name: name, Tier: tier, Reason: reason}
 			items[name] = it
 		}
+		it.Confirmed = it.Confirmed || affected
 		if tier < it.Tier {
 			it.Tier, it.Reason = tier, reason
 		}
@@ -81,6 +84,7 @@ func plan(findings []model.Finding, keep func(model.Status) bool) []model.Rotati
 			continue
 		}
 		e := f.Exposure
+		affected = f.Status == model.Affected
 		for _, r := range e.CloudRoles {
 			add(fmt.Sprintf("%s role %s", r.Provider, r.Role), 1,
 				"OIDC role the job could assume — no static secret to rotate; review cloud audit logs for the window and tighten the trust policy", f.Run)
@@ -129,6 +133,9 @@ func plan(findings []model.Finding, keep func(model.Status) bool) []model.Rotati
 	sort.Slice(out, func(a, b int) bool {
 		if out[a].Tier != out[b].Tier {
 			return out[a].Tier < out[b].Tier
+		}
+		if out[a].Confirmed != out[b].Confirmed {
+			return out[a].Confirmed
 		}
 		return out[a].Name < out[b].Name
 	})

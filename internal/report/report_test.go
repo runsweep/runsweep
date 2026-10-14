@@ -31,8 +31,8 @@ func sample() (*incident.Incident, *model.Result) {
 				Evidence: []model.Evidence{{Kind: "note", Detail: "jobs unavailable: deleted by GitHub retention (HTTP 410)"}}},
 		},
 		Rotation: []model.RotationItem{
-			{Name: "OIDC token (id-token: write)", Tier: 1, Reason: "review cloud roles", Runs: []model.RunRef{run}},
-			{Name: "NPM_TOKEN", Tier: 2, Reason: "rotate", Runs: []model.RunRef{run}},
+			{Name: "OIDC token (id-token: write)", Tier: 1, Reason: "review cloud roles", Runs: []model.RunRef{run}, Confirmed: true},
+			{Name: "NPM_TOKEN", Tier: 2, Reason: "rotate", Runs: []model.RunRef{run}, Confirmed: true},
 		},
 		Unverified: []model.RotationItem{
 			{Name: "DEPLOY_KEY", Tier: 2, Reason: "rotate", Runs: []model.RunRef{{Repo: "o/app", RunID: 43, Job: "publish"}}},

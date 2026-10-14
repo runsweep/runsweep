@@ -10,8 +10,8 @@ Secrets unknown for 1 job (workflow file, job list or run not available); review
 
 | # | Secret / role | Priority | Why | Seen in |
 |---|---|---|---|---|
-| 1 | `OIDC token (id-token: write)` | 1 · cloud | review cloud roles | `o/app#42 build attempt 2` |
-| 2 | `NPM_TOKEN` | 2 · publish/deploy | rotate | `o/app#42 build attempt 2` |
+| 1 | `OIDC token (id-token: write)` | 1 · cloud · AFFECTED job | review cloud roles | `o/app#42 build attempt 2` |
+| 2 | `NPM_TOKEN` | 2 · publish/deploy · AFFECTED job | rotate | `o/app#42 build attempt 2` |
 
 ## Not verified — could not rule out exposure
 

@@ -49,7 +49,7 @@ func Text(w io.Writer, inc *incident.Incident, r *model.Result, color bool) erro
 	b.WriteString("Rotate first\n")
 	b.WriteString(nothingToRotate(r, "  ", "\n", Clean))
 	oneRepo := r.ReposTargeted == 1
-	items := func(list []model.RotationItem) {
+	items := func(list []model.RotationItem, plan bool) {
 		width := 0
 		for _, it := range list {
 			width = max(width, utf8.RuneCountInString(Clean(it.Name)))
@@ -63,14 +63,14 @@ func Text(w io.Writer, inc *incident.Incident, r *model.Result, color bool) erro
 					runs[j] = ref
 				}
 			}
-			fmt.Fprintf(&b, "  %-3d%-*s  %s\n", i+1, width, Clean(it.Name), tier(it.Tier))
+			fmt.Fprintf(&b, "  %-3d%-*s  %s\n", i+1, width, Clean(it.Name), tier(it.Tier)+seenBy(it, plan))
 			fmt.Fprintf(&b, "     %s\n     seen in: %s\n", Clean(it.Reason), seenIn(runs, Clean))
 		}
 	}
-	items(r.Rotation)
+	items(r.Rotation, true)
 	if len(r.Unverified) > 0 {
 		b.WriteString("\n" + unverifiedTitle + "\n")
-		items(r.Unverified)
+		items(r.Unverified, false)
 	}
 
 	b.WriteString("\nFindings\n")
