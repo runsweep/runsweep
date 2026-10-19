@@ -42,7 +42,7 @@ Secrets unknown for 1 job (workflow file, job list or run not available); review
 #### ❔ Unchecked · 1
 
 <details>
-<summary>1 job · `jobs unavailable: deleted by GitHub retention (HTTP 410)`</summary>
+<summary>1 job · <code>jobs unavailable: deleted by GitHub retention (HTTP 410)</code></summary>
 
 | Repo | Workflow › job | Run | Evidence |
 | --- | --- | --- | --- |

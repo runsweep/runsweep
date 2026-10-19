@@ -429,7 +429,7 @@ func TestMarkdownVerdicts(t *testing.T) {
 		{"clear", allClear, []string{"> [!NOTE]\n> **No exposure found. All 5 jobs were checked.**  \n> Nothing to rotate for this incident.\n",
 			"| 0 | 0 | 0 | 5 |", "### Rotate first\n\nNothing. No job is affected, possible or unchecked.\n", "#### ✅ Clean · 5"}, []string{"#### 🛑", "### Not verified"}},
 		{"not cleared", notCleared, []string{"> [!WARNING]\n> **Not cleared: 1 of 5 jobs could not be verified.**  \n> No job is proven to have run it. Treat the secrets under *Not verified*",
-			"| 0 | 0 | **1** | 4 |", "<details>\n<summary>1 job · `jobs unavailable: deleted by GitHub retention (HTTP 410)`</summary>"}, []string{"No exposure"}},
+			"| 0 | 0 | **1** | 4 |", "<details>\n<summary>1 job · <code>jobs unavailable: deleted by GitHub retention (HTTP 410)</code></summary>"}, []string{"No exposure"}},
 		{"incomplete", incomplete, []string{"> [!WARNING]\n> **Scan incomplete: `o/b: HTTP 401[2J`.**  \n> The report covers only what was checked; an empty section proves nothing.\n"}, []string{"\x1b", "[!NOTE]"}},
 		{"possible", possible, []string{"> [!CAUTION]\n> **Possibly exposed: 1 job may have run a compromised package or action.**  \n> Review the secrets under *Not verified* now.\n"}, nil},
 		{"skipped", skipped, []string{"**Not cleared: 1 repository was skipped.**"}, []string{"[!NOTE]"}},
@@ -507,7 +507,7 @@ func TestMarkdownUncheckedGroupsAndWhy(t *testing.T) {
 	res.Unverified[0].Runs[0].Job = "j"
 	res.Findings = []model.Finding{un(1, "log gone"), un(2, ""), un(3, "gradle"), un(43, "gradle"), un(5, "gradle"), un(6, "log gone")}
 	out := render(t, inc, res)
-	i, j, k := strings.Index(out, "<summary>3 jobs · `gradle`"), strings.Index(out, "<summary>2 jobs · `log gone`"), strings.Index(out, "<summary>1 job · no reason recorded")
+	i, j, k := strings.Index(out, "<summary>3 jobs · <code>gradle</code>"), strings.Index(out, "<summary>2 jobs · <code>log gone</code>"), strings.Index(out, "<summary>1 job · no reason recorded")
 	if i < 0 || j < i || k < j {
 		t.Fatalf("groups not ordered by size:\n%s", out)
 	}
@@ -527,7 +527,7 @@ func TestMarkdownSummaryInjection(t *testing.T) {
 	for _, line := range strings.Split(out, "\n") {
 		if strings.HasPrefix(line, "<summary>1 job") {
 			found = true
-			if !strings.HasSuffix(line, "…`</summary>") || strings.Count(line, "<") != 2 || strings.Count(line, "</summary>") != 1 || strings.Contains(stripCode(line), "](") || strings.Contains(line, `\|`) {
+			if !strings.HasSuffix(line, "…</code></summary>") || strings.Count(line, "<") != 4 || strings.Count(line, "</summary>") != 1 || strings.Contains(stripCode(line), "](") || strings.Contains(line, `\|`) {
 				t.Fatalf("summary: %q", line)
 			}
 			if n := strings.Count(line, "я"); n != 119-len([]rune(Clean(strings.SplitN(evil, "я", 2)[0]))) {
@@ -550,10 +550,10 @@ func TestMarkdownSummaryInjection(t *testing.T) {
 	}
 }
 
-// stripCode drops inline code spans from one line.
+// stripCode drops inline code spans and the escaped <code> elements of summaries from one line.
 func stripCode(line string) string { return codeSpan.ReplaceAllString(line, "") }
 
-var codeSpan = regexp.MustCompile("`[^`]*`")
+var codeSpan = regexp.MustCompile("`[^`]*`|<code>[^<]*</code>")
 
 var evilStrings = []string{
 	`x <a href="https:\\evil.example">rotate</a> y`, `[x](https:\\evil)`, `![p](https://e/p.png)`, "@org/team",
