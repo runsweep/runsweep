@@ -174,6 +174,7 @@ func run(args []string, stdout, stderr io.Writer, d deps) int {
 		SilenceUsage: true, SilenceErrors: true}
 	info, _ := debug.ReadBuildInfo()
 	root.Version = versionString(version, commit, date, info)
+	report.Version = root.Version
 	root.SetVersionTemplate("runsweep {{.Version}}\n")
 	root.SetArgs(args)
 	root.SetOut(stdout)

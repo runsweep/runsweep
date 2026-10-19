@@ -275,7 +275,7 @@ func TestInterruptedPrintsPartialReport(t *testing.T) {
 		if code != tc.code || !strings.Contains(errb.String(), tc.errWant) || strings.Contains(errb.String(), "no repository could be scanned") {
 			t.Errorf("%s: code %d, stderr:\n%s", tc.name, code, errb.String())
 		}
-		if !strings.HasPrefix(out.String(), "Scan incomplete: ") || tc.code == 1 && !strings.Contains(out.String(), "## Findings") {
+		if !strings.Contains(out.String(), "> **Scan incomplete: ") || tc.code == 1 && !strings.Contains(out.String(), "### Findings") {
 			t.Errorf("%s: report does not start with Scan incomplete or hides findings:\n%s", tc.name, out.String())
 		}
 		if !strings.Contains(out.String(), "`o/c` — `interrupted: not scanned`") {
@@ -440,11 +440,11 @@ func TestFormatDefault(t *testing.T) {
 		prefix    string
 		wantColor bool
 	}{
-		{"pipe defaults to md", fakeDeps(affectedFake()), nil, nil, "# runsweep: ", false},
+		{"pipe defaults to md", fakeDeps(affectedFake()), nil, nil, "## runsweep · ", false},
 		{"terminal defaults to text", tty, nil, map[string]string{"TERM": "xterm-256color"}, "runsweep · ", true},
 		{"NO_COLOR", tty, nil, map[string]string{"NO_COLOR": "1", "TERM": "xterm-256color"}, "runsweep · ", false},
 		{"TERM=dumb", tty, nil, map[string]string{"TERM": "dumb"}, "runsweep · ", false},
-		{"explicit md on a terminal", tty, []string{"--format", "md"}, nil, "# runsweep: ", false},
+		{"explicit md on a terminal", tty, []string{"--format", "md"}, nil, "## runsweep · ", false},
 		{"explicit text in a pipe", fakeDeps(affectedFake()), []string{"--format", "text"}, nil, "runsweep · ", false},
 		{"explicit json on a terminal", tty, []string{"--format", "json"}, nil, "{", false},
 	} {
@@ -797,7 +797,7 @@ func TestFatalScanReportsIncomplete(t *testing.T) {
 		if code := run([]string{"scan", "--incident", writeInc(t, incYAML), "--repo", "o/a", "--format", format}, &out, &errb, bad); code != 2 {
 			t.Fatalf("%s: got %d: %s", format, code, errb.String())
 		}
-		if !strings.HasPrefix(out.String(), "Scan incomplete: ") || strings.Contains(out.String(), "No affected jobs found") || strings.Contains(out.String(), "Nothing to rotate") {
+		if !strings.Contains(out.String(), "Scan incomplete: ") || strings.Contains(out.String(), "No affected jobs found") || strings.Contains(out.String(), "Nothing to rotate") {
 			t.Errorf("%s:\n%s", format, out.String())
 		}
 	}
@@ -818,7 +818,7 @@ func TestFatalScanReportsIncomplete(t *testing.T) {
 	f.NoAccess["o/a"] = true
 	out.Reset()
 	if code := run([]string{"scan", "--incident", writeInc(t, incYAML), "--repo", "o/a", "--format", "md"}, &out, &errb, fakeDeps(f)); code != 2 ||
-		!strings.HasPrefix(out.String(), "Scan incomplete: no repository could be scanned") {
+		!strings.Contains(out.String(), "> **Scan incomplete: no repository could be scanned") {
 		t.Fatalf("all skipped: %d\n%s", code, out.String())
 	}
 }
