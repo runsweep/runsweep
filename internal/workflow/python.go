@@ -24,7 +24,7 @@ const (
 )
 
 // pyStartRe: what may precede a command word on its line.
-var pyStartRe = regexp.MustCompile(`(?:^|[;&|({]|\$\(|\b(?:then|do|else|if|elif|while|until)\b)\s*` + pyWrap + `$`)
+var pyStartRe = regexp.MustCompile(`(?:^|[;&|({` + "`" + `]|\$\(|\b(?:then|do|else|if|elif|while|until)\b)\s*` + pyWrap + `$`)
 
 // pyInterpRe: an interpreter given as a quoted string or variable, then flags and -m: the tool word
 // is the module ("${{ steps.py.outputs.python-path }}" -m pip install x).
@@ -90,7 +90,7 @@ func PyInstalls(text string) []PyInstall {
 			continue
 		}
 		seg := prefix
-		if i := strings.LastIndexAny(seg, ";&|({"); i >= 0 {
+		if i := strings.LastIndexAny(seg, ";&|({`"); i >= 0 {
 			seg = seg[i+1:]
 		}
 		words := strings.Fields(seg)
@@ -108,10 +108,14 @@ func PyInstalls(text string) []PyInstall {
 		if rest != "" && (rest[0] == '"' || rest[0] == '\'') {
 			rest = rest[1:] // the closing quote of a quoted command word
 		}
+		restStart := len(text) - len(rest)
+		if i := strings.IndexByte(rest, '`'); i >= 0 && strings.Count(prefix, "`")%2 == 1 {
+			rest = rest[:i] // inside a backtick substitution: it ends at the closing backtick
+		}
 		args, capped := commandArgs(rest)
-		end := len(text)
+		end := restStart + len(rest)
 		if i := strings.IndexAny(rest, "\n;&|)"); i >= 0 {
-			end = len(text) - len(rest) + i
+			end = restStart + i
 		}
 		inside = end
 		cmd := strings.TrimSpace(text[cmdStart:end])
@@ -278,8 +282,8 @@ func classifyInterpreter(args []string) (PyInstall, bool) {
 			return classifyModule(args[i+1], args[i+2:])
 		case strings.HasPrefix(a, "-m") && len(a) > 2:
 			return classifyModule(a[2:], args[i+1:])
-		case a == "-c":
-			return PyInstall{}, false
+		case a == "-c": // inline code may run pip
+			return PyInstall{Tool: "python -c", Opaque: true}, true
 		case a == "-X" || a == "-W":
 			i++
 		case strings.HasPrefix(a, "-"):
@@ -353,7 +357,7 @@ func (j *Job) HasPython() bool {
 }
 
 // pathCmdRe: a command word with a path (script/bootstrap, tools\setup.cmd) runs a repository script.
-var pathCmdRe = regexp.MustCompile(`(?m)(?:^|[;&|({]|\b(?:then|do|else)\b)[ \t]*["']?[^\s;&|()'"]*[/\\]`)
+var pathCmdRe = regexp.MustCompile(`(?m)(?:^|[;&|({]|\b(?:then|do|else|if|elif|while|until)\b)[ \t]*` + pyWrap + `["']?[^\s;&|()'"]*[/\\]`)
 
 // plainShell are the shells whose commands the scan reads; any other `shell:` (python, a template)
 // runs code it does not see.
