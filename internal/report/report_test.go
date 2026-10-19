@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -352,7 +353,7 @@ func TestIncompleteKeepsFindings(t *testing.T) {
 		s := b.String()
 		head, title := "Scan incomplete: o/b: HTTP 401\n", unverifiedTitle
 		if name == "md" {
-			head, title = "> **Scan incomplete: `o/b: HTTP 401`.**", "### Not verified"
+			head, title = "> The scan stopped early (`o/b: HTTP 401`)", "### Not verified"
 		}
 		if !strings.Contains(s, head) || name == "text" && !strings.HasPrefix(s, head) || !strings.Contains(s, title) ||
 			!strings.Contains(s, "DEPLOY_KEY") || !strings.Contains(s, "axios@1.14.1 in package-lock.json") || strings.Contains(s, "Nothing") {
@@ -410,6 +411,7 @@ func TestMarkdownVerdicts(t *testing.T) {
 	notCleared.Findings, notCleared.Rotation = notCleared.Findings[1:], nil
 	_, incomplete := sample()
 	incomplete.Incomplete, incomplete.Error = true, "o/b: HTTP 401\x1b[2J"
+	incomplete.Findings, incomplete.Rotation, incomplete.Unverified = nil, nil, nil
 	_, possible := sample()
 	possible.Findings[0].Status, possible.Rotation = model.Possible, possible.Rotation[:0]
 	_, skipped := sample()
@@ -427,9 +429,9 @@ func TestMarkdownVerdicts(t *testing.T) {
 		{"clear", allClear, []string{"> [!NOTE]\n> **No exposure found. All 5 jobs were checked.**  \n> Nothing to rotate for this incident.\n",
 			"| 0 | 0 | 0 | 5 |", "### Rotate first\n\nNothing. No job is affected, possible or unchecked.\n", "#### ✅ Clean · 5"}, []string{"#### 🛑", "### Not verified"}},
 		{"not cleared", notCleared, []string{"> [!WARNING]\n> **Not cleared: 1 of 5 jobs could not be verified.**  \n> No job is proven to have run it. Treat the secrets under *Not verified*",
-			"| 0 | 0 | **1** | 4 |", "<details>\n<summary>1 job · jobs unavailable: deleted by GitHub retention (HTTP 410)</summary>"}, []string{"No exposure"}},
+			"| 0 | 0 | **1** | 4 |", "<details>\n<summary>1 job · `jobs unavailable: deleted by GitHub retention (HTTP 410)`</summary>"}, []string{"No exposure"}},
 		{"incomplete", incomplete, []string{"> [!WARNING]\n> **Scan incomplete: `o/b: HTTP 401[2J`.**  \n> The report covers only what was checked; an empty section proves nothing.\n"}, []string{"\x1b", "[!NOTE]"}},
-		{"possible", possible, []string{"> [!CAUTION]\n> **Possibly exposed: 1 job may have run a compromised package or action.**  \n> Review the secrets under *Also review* now.\n"}, nil},
+		{"possible", possible, []string{"> [!CAUTION]\n> **Possibly exposed: 1 job may have run a compromised package or action.**  \n> Review the secrets under *Not verified* now.\n"}, nil},
 		{"skipped", skipped, []string{"**Not cleared: 1 repository was skipped.**"}, []string{"[!NOTE]"}},
 		{"retention", retention, []string{"**Not cleared: runs older than 90 days may be gone.**"}, []string{"[!NOTE]"}},
 	} {
@@ -502,13 +504,14 @@ func TestMarkdownUncheckedGroupsAndWhy(t *testing.T) {
 		}
 		return model.Finding{Run: model.RunRef{Repo: "o/app", RunID: run, Job: "j"}, Status: model.Unchecked, Evidence: ev}
 	}
+	res.Unverified[0].Runs[0].Job = "j"
 	res.Findings = []model.Finding{un(1, "log gone"), un(2, ""), un(3, "gradle"), un(43, "gradle"), un(5, "gradle"), un(6, "log gone")}
 	out := render(t, inc, res)
-	i, j, k := strings.Index(out, "<summary>3 jobs · gradle"), strings.Index(out, "<summary>2 jobs · log gone"), strings.Index(out, "<summary>1 job · no reason recorded")
+	i, j, k := strings.Index(out, "<summary>3 jobs · `gradle`"), strings.Index(out, "<summary>2 jobs · `log gone`"), strings.Index(out, "<summary>1 job · no reason recorded")
 	if i < 0 || j < i || k < j {
 		t.Fatalf("groups not ordered by size:\n%s", out)
 	}
-	if !strings.Contains(out, "| **`DEPLOY_KEY`** | publish/deploy | 1 | gradle |") {
+	if !strings.Contains(out, "| **`DEPLOY_KEY`** | publish/deploy | 1 | `gradle` |") {
 		t.Fatalf("why not verified:\n%s", out)
 	}
 }
@@ -520,23 +523,146 @@ func TestMarkdownSummaryInjection(t *testing.T) {
 	res.Findings[1].Run.Job = "</details>|`j`](http://e)\n<b>"
 	res.Rotation[1].Name = "n</td>|`](http://e)\n<b>"
 	out := render(t, inc, res)
+	found := false
 	for _, line := range strings.Split(out, "\n") {
 		if strings.HasPrefix(line, "<summary>1 job") {
-			if !strings.HasSuffix(line, "…</summary>") || strings.Count(line, "<") != 2 || strings.Count(line, "</summary>") != 1 || strings.Contains(line, "](") {
+			found = true
+			if !strings.HasSuffix(line, "…`</summary>") || strings.Count(line, "<") != 2 || strings.Count(line, "</summary>") != 1 || strings.Contains(stripCode(line), "](") || strings.Contains(line, `\|`) {
 				t.Fatalf("summary: %q", line)
 			}
-			if n := strings.Count(line, "я"); n == 0 || n > 120-len([]rune(cell(strings.SplitN(evil, "я", 2)[0]))) {
+			if n := strings.Count(line, "я"); n != 119-len([]rune(Clean(strings.SplitN(evil, "я", 2)[0]))) {
 				t.Fatalf("reason not cut to 120 runes (%d я): %q", n, line)
 			}
 		}
 	}
+	if !found {
+		t.Fatalf("no group summary:\n%s", out)
+	}
 	for _, bad := range []string{"<img", "<b>", "</td>", "</details>|"} {
-		if strings.Contains(strings.ReplaceAll(out, "</details>\n", ""), bad) && !strings.Contains(out, "`"+bad) && !strings.Contains(out, "\\|") {
-			t.Fatalf("raw %q leaked:\n%s", bad, out)
+		for _, line := range strings.Split(out, "\n") {
+			if strings.Contains(stripCode(line), bad) {
+				t.Fatalf("raw %q outside code: %q", bad, line)
+			}
 		}
 	}
 	if n := strings.Count(out, "\n<details>\n"); n != 2 { // the UNCHECKED group and Limits
 		t.Fatalf("%d <details>:\n%s", n, out)
+	}
+}
+
+// stripCode drops inline code spans from one line.
+func stripCode(line string) string { return codeSpan.ReplaceAllString(line, "") }
+
+var codeSpan = regexp.MustCompile("`[^`]*`")
+
+var evilStrings = []string{
+	`x <a href="https:\\evil.example">rotate</a> y`, `[x](https:\\evil)`, `![p](https://e/p.png)`, "@org/team",
+	"a`b``c", "l1\nl2\r\nl3", "</summary>", "</details>", "<img src=x>", "a|b",
+}
+
+// TestMarkdownInjectionCases puts every hostile string into each place repo-derived text reaches.
+func TestMarkdownInjectionCases(t *testing.T) {
+	for _, incomplete := range []bool{false, true} {
+		want := markup(renderHostile(t, "x", incomplete))
+		for _, evil := range evilStrings {
+			if got := markup(renderHostile(t, evil, incomplete)); got != want {
+				t.Errorf("%q leaked markup outside code spans (incomplete=%v):\n%s", evil, incomplete, renderHostile(t, evil, incomplete))
+			}
+		}
+	}
+}
+
+// hostile is the sample with one string in every place repo-derived text reaches.
+func hostile(evil string, incomplete bool) (*incident.Incident, *model.Result) {
+	inc, res := sample()
+	res.Findings[0].Run.Job = evil
+	res.Findings[0].Evidence[0].Detail = evil
+	res.Findings[1].Evidence = []model.Evidence{{Kind: "note", Detail: evil}}
+	res.Rotation[1].Name, res.Unverified[0].Name = evil, evil
+	res.Unverified[0].Runs = []model.RunRef{res.Findings[1].Run}
+	res.Error, res.Incomplete = evil, incomplete
+	return inc, res
+}
+
+func renderHostile(t testing.TB, evil string, incomplete bool) string {
+	t.Helper()
+	inc, res := hostile(evil, incomplete)
+	var b bytes.Buffer
+	if err := Markdown(&b, inc, res); err != nil {
+		t.Fatal(err)
+	}
+	return b.String()
+}
+
+// markup is what is left of s outside code spans, reduced to its markup characters.
+func markup(s string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(s, "\n") {
+		for _, r := range stripCode(line) {
+			if strings.ContainsRune("<>@!", r) {
+				b.WriteRune(r)
+			}
+		}
+		b.WriteString(strings.Repeat("](", strings.Count(stripCode(line), "](")))
+	}
+	return b.String()
+}
+
+func TestMarkdownIncompleteAffected(t *testing.T) {
+	inc, res := sample()
+	res.Incomplete, res.Error = true, "o/b: HTTP 401 | x"
+	out := render(t, inc, res)
+	want := "> [!CAUTION]\n> **Exposed: 1 job ran a compromised package or action.**  \n> Rotate the 2 secrets under *Rotate first* now.  \n> The scan stopped early (`o/b: HTTP 401 | x`); more jobs may be affected.\n"
+	if !strings.Contains(out, want) {
+		t.Fatalf("missing %q in\n%s", want, out)
+	}
+	res.Findings, res.Rotation, res.Unverified = nil, nil, nil
+	if out := render(t, inc, res); !strings.Contains(out, "> [!WARNING]\n> **Scan incomplete: ") || strings.Contains(out, "more jobs may be affected") {
+		t.Fatalf("incomplete with nothing found:\n%s", out)
+	}
+}
+
+func TestMarkdownZeroJobs(t *testing.T) {
+	inc, res := sample()
+	res.Findings, res.Rotation, res.Unverified, res.Skipped, res.JobsScanned, res.RunsScanned = nil, nil, nil, nil, 0, 0
+	out := render(t, inc, res)
+	if !strings.Contains(out, "> [!WARNING]\n> **No jobs found in the window.**  \n> Check the incident window and the repositories; nothing was verified.\n") ||
+		strings.Contains(out, "[!NOTE]") || strings.Contains(out, "### Findings") {
+		t.Fatalf("zero jobs:\n%s", out)
+	}
+}
+
+func TestMarkdownRepoLevelUnchecked(t *testing.T) {
+	inc, res := sample()
+	res.Findings, res.Rotation, res.Unverified, res.JobsScanned = res.Findings[1:], nil, nil, 0
+	res.Findings[0].Run.RunID = 0
+	out := render(t, inc, res)
+	if !strings.Contains(out, "**Not cleared: 1 of 1 job could not be verified.**") || strings.Contains(out, "of 0") {
+		t.Fatalf("denominator:\n%s", out)
+	}
+	if strings.Contains(out, "under *Not verified*") {
+		t.Fatalf("names a missing section:\n%s", out)
+	}
+}
+
+func TestMarkdownActionNamesPrintedSections(t *testing.T) {
+	_, res := sample()
+	res.Findings[0].Status, res.Findings, res.Rotation, res.Unverified = model.Possible, res.Findings[:1], nil, nil
+	if v := mdVerdict(res); !strings.Contains(v, "Review the POSSIBLE jobs under *Findings*.") {
+		t.Fatal(v)
+	}
+}
+
+func TestMarkdownWhyNotMatchesJob(t *testing.T) {
+	inc, res := sample()
+	other := model.Finding{Run: model.RunRef{Repo: "o/app", RunID: 43, JobID: 2, Job: "other"}, Status: model.Unchecked,
+		Evidence: []model.Evidence{{Kind: "note", Detail: "wrong job"}}}
+	mine := model.Finding{Run: model.RunRef{Repo: "o/app", RunID: 43, JobID: 3, Job: "publish"}, Status: model.Unchecked,
+		Evidence: []model.Evidence{{Kind: "note", Detail: "right job"}}}
+	res.Unverified[0].Runs = []model.RunRef{mine.Run}
+	res.Findings = append(res.Findings, other, other, mine)
+	if out := render(t, inc, res); !strings.Contains(out, "| 1 | `right job` |") {
+		t.Fatalf("why not verified:\n%s", out)
 	}
 }
 

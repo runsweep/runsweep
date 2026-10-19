@@ -275,7 +275,7 @@ func TestInterruptedPrintsPartialReport(t *testing.T) {
 		if code != tc.code || !strings.Contains(errb.String(), tc.errWant) || strings.Contains(errb.String(), "no repository could be scanned") {
 			t.Errorf("%s: code %d, stderr:\n%s", tc.name, code, errb.String())
 		}
-		if !strings.Contains(out.String(), "> **Scan incomplete: ") || tc.code == 1 && !strings.Contains(out.String(), "### Findings") {
+		if !strings.Contains(out.String(), "> **Scan incomplete: ") && !strings.Contains(out.String(), "> The scan stopped early (") || tc.code == 1 && !strings.Contains(out.String(), "### Findings") {
 			t.Errorf("%s: report does not start with Scan incomplete or hides findings:\n%s", tc.name, out.String())
 		}
 		if !strings.Contains(out.String(), "`o/c` — `interrupted: not scanned`") {
