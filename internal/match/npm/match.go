@@ -34,7 +34,7 @@ type Result struct {
 	Pinned []string
 	// Rest: the status from everything but the pins.
 	Rest model.Status
-	// NoLock: directories of package.json files with dependencies and no lockfile.
+	// NoLock: directories of package.json files with dependencies and no readable lockfile.
 	NoLock []string
 }
 
@@ -365,6 +365,8 @@ func (c *Cache) Match(ctx context.Context, f Fetcher, repo, sha string, bad []in
 			if lockNames[dir] == nil && !failedDirs[dir] && len(names) > 0 {
 				r.mark(model.Unchecked)
 				r.Evidence = append(r.Evidence, model.Evidence{Kind: "note", Detail: fmt.Sprintf("no lockfile for %s — transitive dependencies unknown", pj.path)})
+			}
+			if (lockNames[dir] == nil || failedDirs[dir]) && len(names) > 0 {
 				r.NoLock = append(r.NoLock, pdir)
 			}
 		}
