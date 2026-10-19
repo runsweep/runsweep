@@ -17,6 +17,7 @@ func FuzzIncidentParse(f *testing.F) {
 		f.Add(b)
 	}
 	f.Add([]byte("id: x\nwindow: {start: 2026-01-01T00:00:00Z, end: 2026-01-02T00:00:00Z}\nnpm: [{name: a, versions: ['*']}]\n"))
+	f.Add([]byte("id: x\nwindow: {start: 2026-01-01T00:00:00Z, end: 2026-01-02T00:00:00Z}\npypi: [{name: Lite_LLM, versions: ['1.82.7', '1!2.0rc1']}]\n"))
 	f.Add([]byte("window: {start: 1}\n"))
 	f.Fuzz(func(t *testing.T, b []byte) {
 		inc, err := Parse(b)

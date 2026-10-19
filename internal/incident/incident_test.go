@@ -155,3 +155,26 @@ func TestLoadBareNameIsPresetOnly(t *testing.T) {
 		t.Fatalf(".YML is a file suffix too: %v", err)
 	}
 }
+
+func TestPyPIIncident(t *testing.T) {
+	ok := "id: x\nwindow: {start: 2026-03-24T00:00:00Z, end: 2026-03-25T00:00:00Z}\npypi:\n  - {name: LiteLLM, versions: [\"1.82.7\", \"1.82.8\"]}\n  - {name: evil, versions: [\"*\"]}\nrefs: []\n"
+	inc, err := Parse([]byte(ok))
+	if err != nil || len(inc.PyPI) != 2 || inc.PyPI[0].Name != "LiteLLM" {
+		t.Fatalf("%v %+v", err, inc)
+	}
+	for name, body := range map[string]string{
+		"bad version": "pypi:\n  - {name: x, versions: [\"latest\"]}\n",
+		"bad name":    "pypi:\n  - {name: \"a b\", versions: [\"1.0\"]}\n",
+		"star mixed":  "pypi:\n  - {name: x, versions: [\"*\", \"1.0\"]}\n",
+		"no versions": "pypi:\n  - {name: x, versions: []}\n",
+	} {
+		y := "id: x\nwindow: {start: 2026-03-24T00:00:00Z, end: 2026-03-25T00:00:00Z}\n" + body + "refs: []\n"
+		if _, err := Parse([]byte(y)); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	none := "id: x\nwindow: {start: 2026-03-24T00:00:00Z, end: 2026-03-25T00:00:00Z}\nrefs: []\n"
+	if _, err := Parse([]byte(none)); err == nil || !strings.Contains(err.Error(), "npm, pypi or actions") {
+		t.Errorf("empty incident: %v", err)
+	}
+}
