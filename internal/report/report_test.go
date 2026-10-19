@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -19,7 +20,7 @@ func sample() (*incident.Incident, *model.Result) {
 	t0 := time.Date(2026, 3, 31, 0, 21, 0, 0, time.UTC)
 	inc := &incident.Incident{ID: "axios-2026-03", Title: "axios malicious release", Window: incident.Window{Start: t0, End: t0.Add(3 * time.Hour)},
 		Refs: []string{"https://osv.dev/vulnerability/MAL-2026-2307"}}
-	run := model.RunRef{Repo: "o/app", RunID: 42, Workflow: ".github/workflows/ci.yml", HeadSHA: "abcdef1234567",
+	run := model.RunRef{Repo: "o/app", RunID: 42, RunNumber: 17, Workflow: ".github/workflows/ci.yml", HeadSHA: "abcdef1234567",
 		RunURL: "https://github.com/o/app/actions/runs/42", CreatedAt: t0.Add(time.Hour), JobID: 7, Job: "build",
 		JobURL: "https://github.com/o/app/actions/runs/42/job/7", Attempt: 2}
 	res := &model.Result{IncidentID: inc.ID, Start: inc.Window.Start, End: inc.Window.End, ReposTargeted: 3, RunsScanned: 3, JobsScanned: 5,
@@ -91,7 +92,7 @@ func TestMarkdownEscapesCells(t *testing.T) {
 	out := b.String()
 	for _, line := range strings.Split(out, "\n") {
 		if strings.Contains(line, "injected") {
-			if !strings.HasPrefix(line, "| ") || strings.Contains(line, "\r") || !strings.Contains(line, `a\|b \| X \| injected`) {
+			if strings.Contains(line, "\r") || !strings.Contains(line, `a\|b \| X \| injected`) {
 				t.Fatalf("unescaped row: %q", line)
 			}
 		}
@@ -140,10 +141,10 @@ func TestMarkdownNoInjection(t *testing.T) {
 	if strings.Contains(out, "(https://evil") {
 		t.Fatal("non-github run URL linked")
 	}
-	// table row count unchanged: header + separator + 2 findings
+	// finding rows unchanged: 2 findings
 	n := 0
 	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(line, "| AFFECTED") || strings.HasPrefix(line, "| UNCHECKED") {
+		if strings.HasPrefix(line, "| `o/") {
 			n++
 		}
 	}
@@ -203,7 +204,7 @@ func TestMarkdownRetentionWarning(t *testing.T) {
 	if err := Markdown(&b, inc, res); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(b.String(), "jobs scanned: 5\n\nWarning: incident window starts more than 90 days ago; GitHub may have deleted runs — absence of runs is not evidence.\n") {
+	if !strings.Contains(b.String(), "**Scanned** 2 repos · 3 runs · 5 jobs\nWarning: incident window starts more than 90 days ago; GitHub may have deleted runs — absence of runs is not evidence.\n") {
 		t.Fatal(b.String())
 	}
 }
@@ -244,7 +245,7 @@ func TestMarkdownAttempt(t *testing.T) {
 	if err := Markdown(&b, inc, res); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(b.String(), "| [42](https://github.com/o/app/actions/runs/42) attempt 2 |") {
+	if !strings.Contains(b.String(), "| [17](https://github.com/o/app/actions/runs/42/job/7) attempt 2 |") {
 		t.Fatal(b.String())
 	}
 	res.Findings[0].Run.Attempt = 1
@@ -293,7 +294,7 @@ func TestSeenInAttempt(t *testing.T) {
 	if err := Markdown(&b, inc, res); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(b.String(), "`o/app#42 build attempt 2`") {
+	if !strings.Contains(b.String(), "`o/app` run [17](https://github.com/o/app/actions/runs/42/job/7) › `build` attempt 2") {
 		t.Fatal(b.String())
 	}
 }
@@ -329,8 +330,8 @@ func TestMarkdownOnlyUnverified(t *testing.T) {
 	if err := Markdown(&b, inc, res); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(b.String(), "## Rotate first\n\nNothing confirmed to rotate; 1 secret in jobs that could not be checked.\n\n"+
-		"## Not verified — could not rule out exposure\n\n| # |") || strings.Contains(b.String(), "Nothing to rotate") {
+	if !strings.Contains(b.String(), "### Rotate first\n\nNothing confirmed to rotate; 1 secret in jobs that could not be checked.\n\n"+
+		"### Not verified\n\n❔ ") || strings.Contains(b.String(), "Nothing to rotate") {
 		t.Fatal(b.String())
 	}
 }
@@ -349,7 +350,11 @@ func TestIncompleteKeepsFindings(t *testing.T) {
 			t.Fatal(err)
 		}
 		s := b.String()
-		if !strings.HasPrefix(s, "Scan incomplete: o/b: HTTP 401\n") || !strings.Contains(s, unverifiedTitle) ||
+		head, title := "Scan incomplete: o/b: HTTP 401\n", unverifiedTitle
+		if name == "md" {
+			head, title = "> **Scan incomplete: o/b: HTTP 401.**", "### Not verified"
+		}
+		if !strings.Contains(s, head) || name == "text" && !strings.HasPrefix(s, head) || !strings.Contains(s, title) ||
 			!strings.Contains(s, "DEPLOY_KEY") || !strings.Contains(s, "axios@1.14.1 in package-lock.json") || strings.Contains(s, "Nothing") {
 			t.Errorf("%s:\n%s", name, s)
 		}
@@ -385,5 +390,166 @@ func TestSecretsUnknownReplacesNothingToRotate(t *testing.T) {
 	res.Findings = append(res.Findings, model.Finding{Status: model.Unchecked, Exposure: &model.Exposure{}})
 	if n := len(secretsUnknown(res)); n != 1 {
 		t.Errorf("got %d", n)
+	}
+}
+
+func render(t *testing.T, inc *incident.Incident, res *model.Result) string {
+	t.Helper()
+	var b bytes.Buffer
+	if err := Markdown(&b, inc, res); err != nil {
+		t.Fatal(err)
+	}
+	return b.String()
+}
+
+func TestMarkdownVerdicts(t *testing.T) {
+	inc, hit := sample()
+	_, allClear := sample()
+	allClear.Findings, allClear.Rotation, allClear.Unverified, allClear.Skipped = nil, nil, nil, nil
+	_, notCleared := sample()
+	notCleared.Findings, notCleared.Rotation = notCleared.Findings[1:], nil
+	_, incomplete := sample()
+	incomplete.Incomplete, incomplete.Error = true, "o/b: HTTP 401\x1b[2J"
+	_, possible := sample()
+	possible.Findings[0].Status, possible.Rotation = model.Possible, possible.Rotation[:0]
+	_, skipped := sample()
+	skipped.Findings, skipped.Rotation, skipped.Unverified = nil, nil, nil
+	_, retention := sample()
+	retention.Findings, retention.Rotation, retention.Unverified, retention.Skipped, retention.RetentionWarning = nil, nil, nil, nil, true
+	for _, tc := range []struct {
+		name string
+		res  *model.Result
+		want []string
+		deny []string
+	}{
+		{"hit", hit, []string{"> [!CAUTION]\n> **Exposed: 1 job ran a compromised package or action.**  \n> Rotate the 2 secrets under *Rotate first* now.\n",
+			"| **1** | 0 | **1** | 3 |", "#### 🛑 Affected · 1", "### Not verified"}, []string{"clean", "safe"}},
+		{"clear", allClear, []string{"> [!NOTE]\n> **No exposure found. All 5 jobs were checked.**  \n> Nothing to rotate for this incident.\n",
+			"| 0 | 0 | 0 | 5 |", "### Rotate first\n\nNothing. No job is affected, possible or unchecked.\n", "#### ✅ Clean · 5"}, []string{"#### 🛑", "### Not verified"}},
+		{"not cleared", notCleared, []string{"> [!WARNING]\n> **Not cleared: 1 of 5 jobs could not be verified.**  \n> No job is proven to have run it. Treat the secrets under *Not verified*",
+			"| 0 | 0 | **1** | 4 |", "<details>\n<summary>1 job · jobs unavailable: deleted by GitHub retention (HTTP 410)</summary>"}, []string{"No exposure"}},
+		{"incomplete", incomplete, []string{"> [!WARNING]\n> **Scan incomplete: o/b: HTTP 401[2J.**  \n> The report covers only what was checked; an empty section proves nothing.\n"}, []string{"\x1b", "[!NOTE]"}},
+		{"possible", possible, []string{"> [!CAUTION]\n> **Possibly exposed: 1 job may have run a compromised package or action.**  \n> Review the secrets under *Also review* now.\n"}, nil},
+		{"skipped", skipped, []string{"**Not cleared: 1 repository was skipped.**"}, []string{"[!NOTE]"}},
+		{"retention", retention, []string{"**Not cleared: runs older than 90 days may be gone.**"}, []string{"[!NOTE]"}},
+	} {
+		out := render(t, inc, tc.res)
+		for _, w := range tc.want {
+			if !strings.Contains(out, w) {
+				t.Errorf("%s: missing %q in\n%s", tc.name, w, out)
+			}
+		}
+		verdict := mdVerdict(tc.res)
+		for _, d := range tc.deny {
+			if strings.Contains(out, d) {
+				t.Errorf("%s: unexpected %q in\n%s", tc.name, d, out)
+			}
+		}
+		if !strings.HasPrefix(verdict, "> [!NOTE]") && (strings.Contains(verdict, "✅") || strings.Contains(strings.ToLower(verdict), "clean") || strings.Contains(strings.ToLower(verdict), "safe")) {
+			t.Errorf("%s: verdict reads as all clear: %s", tc.name, verdict)
+		}
+		if n := strings.Count(out, "> [!"); n != 1 {
+			t.Errorf("%s: %d alerts", tc.name, n)
+		}
+		if !strings.HasSuffix(out, "runsweep dev · [How to read this report](https://github.com/runsweep/runsweep#readme)\n") {
+			t.Errorf("%s: footer:\n%s", tc.name, out)
+		}
+	}
+}
+
+func TestMarkdownLimitsCountAndVersion(t *testing.T) {
+	defer func(v string) { Version = v }(Version)
+	Version = "v1.2.3"
+	inc, res := sample()
+	out := render(t, inc, res)
+	want := fmt.Sprintf("<summary>Limits · %d things runsweep cannot see</summary>", strings.Count(limits, "\n- ")+1)
+	if !strings.Contains(out, want) || strings.Count(limits, "\n- ")+1 != strings.Count(limits, "- ") || !strings.Contains(out, "runsweep v1.2.3 · [How") {
+		t.Fatal(out)
+	}
+}
+
+func TestMarkdownCleanFloor(t *testing.T) {
+	inc, res := sample()
+	res.JobsScanned = 1 // fewer jobs than findings
+	if out := render(t, inc, res); !strings.Contains(out, "| **1** | 0 | **1** | 0 |") || strings.Contains(out, "Clean ·") {
+		t.Fatal(out)
+	}
+}
+
+func TestMarkdownPossibleFolds(t *testing.T) {
+	inc, res := sample()
+	f := res.Findings[0]
+	f.Status = model.Possible
+	res.Findings = nil
+	for range 20 {
+		res.Findings = append(res.Findings, f)
+	}
+	if out := render(t, inc, res); strings.Contains(out, "<summary>20 jobs") {
+		t.Fatal("20 possible jobs must stay open")
+	}
+	res.Findings = append(res.Findings, f)
+	if out := render(t, inc, res); !strings.Contains(out, "#### ⚠️ Possible · 21\n\n<details>\n<summary>21 jobs</summary>") {
+		t.Fatal(out)
+	}
+}
+
+func TestMarkdownUncheckedGroupsAndWhy(t *testing.T) {
+	inc, res := sample()
+	un := func(run int64, note string) model.Finding {
+		var ev []model.Evidence
+		if note != "" {
+			ev = []model.Evidence{{Kind: "npm", Detail: "x"}, {Kind: "note", Detail: note}, {Kind: "note", Detail: "second"}}
+		}
+		return model.Finding{Run: model.RunRef{Repo: "o/app", RunID: run, Job: "j"}, Status: model.Unchecked, Evidence: ev}
+	}
+	res.Findings = []model.Finding{un(1, "log gone"), un(2, ""), un(3, "gradle"), un(43, "gradle"), un(5, "gradle"), un(6, "log gone")}
+	out := render(t, inc, res)
+	i, j, k := strings.Index(out, "<summary>3 jobs · gradle"), strings.Index(out, "<summary>2 jobs · log gone"), strings.Index(out, "<summary>1 job · no reason recorded")
+	if i < 0 || j < i || k < j {
+		t.Fatalf("groups not ordered by size:\n%s", out)
+	}
+	if !strings.Contains(out, "| **`DEPLOY_KEY`** | publish/deploy | 1 | gradle |") {
+		t.Fatalf("why not verified:\n%s", out)
+	}
+}
+
+func TestMarkdownSummaryInjection(t *testing.T) {
+	inc, res := sample()
+	evil := "</summary><img src=x onerror=1>|`x`](http://e)\n<details>" + strings.Repeat("я", 200)
+	res.Findings[1].Evidence = []model.Evidence{{Kind: "note", Detail: evil}}
+	res.Findings[1].Run.Job = "</details>|`j`](http://e)\n<b>"
+	res.Rotation[1].Name = "n</td>|`](http://e)\n<b>"
+	out := render(t, inc, res)
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "<summary>1 job") {
+			if !strings.HasSuffix(line, "…</summary>") || strings.Count(line, "<") != 2 || strings.Count(line, "</summary>") != 1 || strings.Contains(line, "](") {
+				t.Fatalf("summary: %q", line)
+			}
+			if n := strings.Count(line, "я"); n == 0 || n > 120-len([]rune(cell(strings.SplitN(evil, "я", 2)[0]))) {
+				t.Fatalf("reason not cut to 120 runes (%d я): %q", n, line)
+			}
+		}
+	}
+	for _, bad := range []string{"<img", "<b>", "</td>", "</details>|"} {
+		if strings.Contains(strings.ReplaceAll(out, "</details>\n", ""), bad) && !strings.Contains(out, "`"+bad) && !strings.Contains(out, "\\|") {
+			t.Fatalf("raw %q leaked:\n%s", bad, out)
+		}
+	}
+	if n := strings.Count(out, "\n<details>\n"); n != 2 { // the UNCHECKED group and Limits
+		t.Fatalf("%d <details>:\n%s", n, out)
+	}
+}
+
+func TestMarkdownRunLinkNeverUntrusted(t *testing.T) {
+	inc, res := sample()
+	res.Findings[0].Run.JobURL = "https://evil.example/x"
+	res.Findings[0].Run.RunURL = "https://github.com/o/a)(b"
+	res.Rotation[0].Runs[0].JobURL = "https://github.com/o/app/actions/runs/42/job/7 [x](http://e)"
+	out := render(t, inc, res)
+	if strings.Contains(out, "evil.example") || strings.Contains(out, "](http://e") || strings.Contains(out, "](https://github.com/o/a)") {
+		t.Fatal(out)
+	}
+	if !strings.Contains(out, "| 17 attempt 2 |") {
+		t.Fatalf("an unlinkable run keeps its number as plain text:\n%s", out)
 	}
 }

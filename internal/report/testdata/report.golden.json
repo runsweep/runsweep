@@ -21,6 +21,7 @@
       "run": {
         "repo": "o/app",
         "run_id": 42,
+        "run_number": 17,
         "workflow": ".github/workflows/ci.yml",
         "head_sha": "abcdef1234567",
         "run_url": "https://github.com/o/app/actions/runs/42",
@@ -72,6 +73,7 @@
         {
           "repo": "o/app",
           "run_id": 42,
+          "run_number": 17,
           "workflow": ".github/workflows/ci.yml",
           "head_sha": "abcdef1234567",
           "run_url": "https://github.com/o/app/actions/runs/42",
@@ -92,6 +94,7 @@
         {
           "repo": "o/app",
           "run_id": 42,
+          "run_number": 17,
           "workflow": ".github/workflows/ci.yml",
           "head_sha": "abcdef1234567",
           "run_url": "https://github.com/o/app/actions/runs/42",
@@ -130,5 +133,6 @@
       "reason": "no access (HTTP 403/404)"
     }
   ],
-  "secrets_unknown_jobs": 1
+  "secrets_unknown_jobs": 1,
+  "clean_jobs": 3
 }

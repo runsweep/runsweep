@@ -150,7 +150,7 @@ func TestRepoLevelFindingHasNoRunNumber(t *testing.T) {
 		if err := render(&b); err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(b.String(), "#0") || strings.Contains(b.String(), "| 0 |") {
+		if strings.Contains(b.String(), "#0") || strings.Contains(b.String(), "`o/big` | `` | 0") || strings.Contains(b.String(), " run 0") {
 			t.Errorf("%s: run number shown for a repo-level finding:\n%s", name, b.String())
 		}
 	}
@@ -178,7 +178,7 @@ func TestHeaderCountsScannedRepositories(t *testing.T) {
 	if err := Markdown(&md, inc, res); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(txt.String(), " · lookback 7d · 2 repositories scanned\n") || !strings.Contains(md.String(), "· repositories scanned: 2 · runs scanned: 3") {
+	if !strings.Contains(txt.String(), " · lookback 7d · 2 repositories scanned\n") || !strings.Contains(md.String(), "**Scanned** 2 repos · 3 runs · 5 jobs") {
 		t.Fatalf("%s\n%s", txt.String(), md.String())
 	}
 	res.ReposTargeted, res.Skipped = 1, nil
@@ -198,7 +198,7 @@ func TestSpreadNoteOnlyWithFindings(t *testing.T) {
 	if err := Markdown(&md, inc, res); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(txt.String(), note+"\n") || !strings.Contains(md.String(), note+"\n\n## Limits") {
+	if !strings.HasSuffix(txt.String(), note+"\n") || !strings.Contains(md.String(), note+"\n\n---") {
 		t.Fatalf("%s\n%s", txt.String(), md.String())
 	}
 	res.Findings = nil

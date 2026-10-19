@@ -3,10 +3,14 @@ package report
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
+	"path"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf16"
@@ -16,11 +20,12 @@ import (
 	"github.com/runsweep/runsweep/internal/model"
 )
 
+// kindNames name the secret kinds in the Markdown report, by tier.
+var kindNames = map[int]string{1: "cloud", 2: "publish/deploy", 3: "third-party", 4: "GITHUB_TOKEN"}
+
 var tierNames = map[int]string{1: "1 · cloud", 2: "2 · publish/deploy", 3: "3 · third-party", 4: "4 · GITHUB_TOKEN"}
 
-const limits = `## Limits
-
-- GitHub deletes workflow runs, checks and logs after the repository's retention period (default 90 days). Older runs cannot be checked and show as UNCHECKED or are absent.
+const limits = `- GitHub deletes workflow runs, checks and logs after the repository's retention period (default 90 days). Older runs cannot be checked and show as UNCHECKED or are absent.
 - Which secrets a job could read is derived from the workflow file at the run's commit; GitHub's API does not expose it directly.
 - Priority by secret name is a name-based heuristic. Review the list; do not treat it as complete.
 - A job whose log was unavailable is reported UNCHECKED: actions used via composite actions (and reusable workflows that are neither local nor pinned to a SHA) can only be seen in the log. Job logs over 64 MB count as unavailable.
@@ -90,30 +95,37 @@ func secretsUnknown(r *model.Result) []model.RunRef {
 // RetentionNote explains why an old window can look clean.
 const RetentionNote = "incident window starts more than 90 days ago; GitHub may have deleted runs — absence of runs is not evidence"
 
+// Version is the release shown in the Markdown footer; main sets it to the --version string.
+var Version = "dev"
+
 // Markdown renders the scan result as a Markdown report.
 func Markdown(w io.Writer, inc *incident.Incident, r *model.Result) error {
 	var b strings.Builder
-	if r.Incomplete {
-		b.WriteString("Scan incomplete: " + Clean(r.Error) + "\n\n")
+	full := !r.Incomplete || len(r.Findings) > 0 // an empty list would read as "all clear"
+	b.WriteString("## runsweep · " + code(inc.ID) + "\n\n")
+	b.WriteString(mdVerdict(r))
+	if full {
+		b.WriteString(mdCounts(r))
 	}
-	fmt.Fprintf(&b, "# runsweep: %s (%s)\n\n", code(inc.Title), code(inc.ID))
-	fmt.Fprintf(&b, "Window: %s → %s UTC · repositories scanned: %d · runs scanned: %d · jobs scanned: %d\n\n",
-		r.Start.UTC().Format("2006-01-02 15:04:05"), r.End.UTC().Format("2006-01-02 15:04:05"), r.ReposTargeted-len(r.Skipped), r.RunsScanned, r.JobsScanned)
+	fmt.Fprintf(&b, "**Incident** %s  \n**Window** %s → %s UTC  \n**Scanned** %s · %s · %s\n",
+		code(inc.Title), r.Start.UTC().Format("2006-01-02 15:04"), r.End.UTC().Format("2006-01-02 15:04"),
+		count(r.ReposTargeted-len(r.Skipped), "repo"), count(r.RunsScanned, "run"), count(r.JobsScanned, "job"))
 	if r.RetentionWarning {
-		b.WriteString("Warning: " + RetentionNote + ".\n\n")
+		b.WriteString("Warning: " + RetentionNote + ".\n")
 	}
-	if !r.Incomplete || len(r.Findings) > 0 { // an empty list would read as "all clear"
+	b.WriteString("\n")
+	if full {
 		mdFindings(&b, r)
 	}
 	if len(r.Skipped) > 0 {
-		b.WriteString("## Skipped repositories\n\n")
+		b.WriteString("### Skipped repositories\n\n")
 		for _, s := range r.Skipped {
 			fmt.Fprintf(&b, "- %s — %s\n", code(s.Repo), code(s.Reason))
 		}
 		b.WriteString("\nThe token needs read access to Actions, Contents and Metadata for these repositories.\n\n")
 	}
 	if len(inc.Refs) > 0 {
-		b.WriteString("## Incident sources\n\n")
+		b.WriteString("### Incident sources\n\n")
 		for _, ref := range inc.Refs {
 			fmt.Fprintf(&b, "- %s\n", code(ref))
 		}
@@ -122,59 +134,270 @@ func Markdown(w io.Writer, inc *incident.Incident, r *model.Result) error {
 	if n := spreadNote(r); n != "" {
 		b.WriteString(n + "\n")
 	}
-	b.WriteString(limits)
+	fmt.Fprintf(&b, "---\n\nrunsweep sees what job logs, workflow files and lockfiles show; some installs leave no trace there. "+
+		"Read the limits before you close the incident.\n\n<details>\n<summary>Limits · %d things runsweep cannot see</summary>\n\n%s\n</details>\n\n",
+		strings.Count(limits, "\n- ")+1, limits)
+	fmt.Fprintf(&b, "runsweep %s · [How to read this report](https://github.com/runsweep/runsweep#readme)\n", Clean(Version))
 	_, err := io.WriteString(w, b.String())
 	return err
 }
 
-// mdFindings renders the counts, the rotation lists and the findings.
+// cleanJobs is the number of scanned jobs that are neither AFFECTED, POSSIBLE nor UNCHECKED.
+func cleanJobs(r *model.Result) int {
+	return max(0, r.JobsScanned-r.Count(model.Affected)-r.Count(model.Possible)-r.Count(model.Unchecked))
+}
+
+// mdVerdict renders the one alert that says what the reader must do.
+func mdVerdict(r *model.Result) string {
+	a, p, u := r.Count(model.Affected), r.Count(model.Possible), r.Count(model.Unchecked)
+	var kind, head, todo string
+	switch {
+	case r.Incomplete:
+		kind, head = "WARNING", "Scan incomplete: "+Clean(r.Error)+"."
+		todo = "The report covers only what was checked; an empty section proves nothing."
+	case a > 0:
+		kind, head = "CAUTION", fmt.Sprintf("Exposed: %s ran a compromised package or action.", count(a, "job"))
+		k := 0
+		for _, it := range r.Rotation {
+			if it.Confirmed {
+				k++
+			}
+		}
+		todo = "Review the secrets under *Also review* and *Not verified*."
+		if k > 0 {
+			todo = fmt.Sprintf("Rotate the %s under *Rotate first* now.", count(k, "secret"))
+		}
+	case p > 0:
+		kind, head = "CAUTION", fmt.Sprintf("Possibly exposed: %s may have run a compromised package or action.", count(p, "job"))
+		todo = "Review the secrets under *Also review* now."
+	case u > 0 || len(r.Skipped) > 0 || r.RetentionWarning:
+		kind = "WARNING"
+		switch {
+		case u > 0:
+			head = fmt.Sprintf("Not cleared: %d of %s could not be verified.", u, count(r.JobsScanned, "job"))
+		case len(r.Skipped) > 0:
+			head = fmt.Sprintf("Not cleared: %d repositories were skipped.", len(r.Skipped))
+			if len(r.Skipped) == 1 {
+				head = "Not cleared: 1 repository was skipped."
+			}
+		default:
+			head = "Not cleared: runs older than 90 days may be gone."
+		}
+		todo = "No job is proven to have run it. Treat the secrets under *Not verified* as possibly exposed until you rotate them or recover the evidence."
+	default:
+		kind, head = "NOTE", fmt.Sprintf("No exposure found. All %s were checked.", count(r.JobsScanned, "job"))
+		todo = "Nothing to rotate for this incident."
+	}
+	return fmt.Sprintf("> [!%s]\n> **%s**  \n> %s\n\n", kind, head, todo)
+}
+
+// mdCounts renders the status counters; non-zero risk counts are bold.
+func mdCounts(r *model.Result) string {
+	n := func(s model.Status) string {
+		if c := r.Count(s); c > 0 {
+			return fmt.Sprintf("**%d**", c)
+		}
+		return "0"
+	}
+	return fmt.Sprintf("| 🛑 Affected | ⚠️ Possible | ❔ Unchecked | ✅ Clean |\n| :---: | :---: | :---: | :---: |\n| %s | %s | %s | %d |\n\n",
+		n(model.Affected), n(model.Possible), n(model.Unchecked), cleanJobs(r))
+}
+
+// mdFindings renders the rotation lists and the findings.
 func mdFindings(b *strings.Builder, r *model.Result) {
-	fmt.Fprintf(b, "**AFFECTED: %d · POSSIBLE: %d · UNCHECKED: %d**\n\n",
-		r.Count(model.Affected), r.Count(model.Possible), r.Count(model.Unchecked))
-
-	b.WriteString("## Rotate first\n\n")
-	b.WriteString(nothingToRotate(r, "", "\n\n", code))
-	items := func(list []model.RotationItem, plan bool) {
-		if len(list) == 0 {
-			return
+	var confirmed, review []model.RotationItem
+	for _, it := range r.Rotation {
+		if it.Confirmed {
+			confirmed = append(confirmed, it)
+		} else {
+			review = append(review, it)
 		}
-		b.WriteString("| # | Secret / role | Priority | Why | Seen in |\n|---|---|---|---|---|\n")
-		for i, it := range list {
-			fmt.Fprintf(b, "| %d | %s | %s | %s | %s |\n", i+1, code(it.Name), tier(it.Tier)+seenBy(it, plan), cell(it.Reason), seenIn(it.Runs, code))
-		}
-		b.WriteString("\n")
 	}
-	items(r.Rotation, true)
-	if len(r.Unverified) > 0 {
-		b.WriteString("## " + unverifiedTitle + "\n\n")
-		items(r.Unverified, false)
-	}
-
-	b.WriteString("## Findings\n\n")
-	if len(r.Findings) == 0 {
-		b.WriteString("No affected jobs found.\n\n")
+	b.WriteString("### Rotate first\n\n")
+	nothing := nothingToRotate(r, "", "\n\n", code)
+	if len(confirmed) > 0 {
+		mdItems(b, confirmed, "🛑")
 	} else {
-		b.WriteString("| Status | Repo | Workflow / job | Run | Evidence |\n|---|---|---|---|---|\n")
-		for _, f := range r.Findings {
-			var ev []string
-			for _, e := range f.Evidence {
-				ev = append(ev, code(e.Detail))
-			}
-			job := f.Run.Workflow
-			if f.Run.Job != "" {
-				job += " / " + f.Run.Job
-			}
-			run := ""
-			if f.Run.RunID != 0 { // 0: a repository-level finding (runs cap)
-				run = link(fmt.Sprint(f.Run.RunID), f.Run.RunURL)
-			}
-			if f.Run.Attempt > 1 {
-				run += fmt.Sprintf(" attempt %d", f.Run.Attempt)
-			}
-			fmt.Fprintf(b, "| %s | %s | %s | %s | %s |\n", f.Status, code(f.Run.Repo), code(job), run, strings.Join(ev, "; "))
+		switch {
+		case nothing == "Nothing to rotate.\n\n":
+			nothing = "Nothing. No job is affected, possible or unchecked.\n\n"
+		case nothing == "" && !r.Incomplete && len(review) > 0:
+			nothing = "Nothing confirmed to rotate. Review the secrets under *Also review*.\n\n"
+		}
+	}
+	b.WriteString(nothing)
+	if len(review) > 0 {
+		b.WriteString("**Also review** · secrets only ⚠️ possible jobs could read:\n\n")
+		mdItems(b, review, "⚠️")
+	}
+	if len(r.Unverified) > 0 {
+		b.WriteString("### Not verified\n\n")
+		b.WriteString("❔ " + count(r.Count(model.Unchecked), "job") + " could not be checked, so these secrets may have been exposed. " +
+			"Rotate them, or recover the evidence and run runsweep again.\n\n")
+		b.WriteString("| Secret | Kind | Unchecked jobs | Why not verified |\n| --- | --- | :---: | --- |\n")
+		for _, it := range r.Unverified {
+			fmt.Fprintf(b, "| **%s** | %s | %d | %s |\n", code(it.Name), kind(it.Tier), len(it.Runs), cell(whyNot(r, it)))
 		}
 		b.WriteString("\n")
 	}
+
+	b.WriteString("### Findings\n\n")
+	var by [4][]model.Finding
+	for _, f := range r.Findings {
+		by[f.Status] = append(by[f.Status], f)
+	}
+	if fs := by[model.Affected]; len(fs) > 0 {
+		fmt.Fprintf(b, "#### 🛑 Affected · %d\n\n%s\n", len(fs), mdTable(fs))
+	}
+	if fs := by[model.Possible]; len(fs) > 0 {
+		fmt.Fprintf(b, "#### ⚠️ Possible · %d\n\n", len(fs))
+		if len(fs) > 20 {
+			fmt.Fprintf(b, "<details>\n<summary>%s</summary>\n\n%s\n</details>\n\n", count(len(fs), "job"), mdTable(fs))
+		} else {
+			b.WriteString(mdTable(fs) + "\n")
+		}
+	}
+	if fs := by[model.Unchecked]; len(fs) > 0 {
+		fmt.Fprintf(b, "#### ❔ Unchecked · %d\n\n", len(fs))
+		groups := map[string][]model.Finding{}
+		var order []string
+		for _, f := range fs {
+			k := firstNote(f)
+			if _, ok := groups[k]; !ok {
+				order = append(order, k)
+			}
+			groups[k] = append(groups[k], f)
+		}
+		slices.SortStableFunc(order, func(x, y string) int { return len(groups[y]) - len(groups[x]) })
+		for _, k := range order {
+			reason := "no reason recorded"
+			if k != "" {
+				reason = k
+			}
+			fmt.Fprintf(b, "<details>\n<summary>%s · %s</summary>\n\n%s\n</details>\n\n", count(len(groups[k]), "job"), summaryText(reason), mdTable(groups[k]))
+		}
+	}
+	if n := cleanJobs(r); n > 0 {
+		fmt.Fprintf(b, "#### ✅ Clean · %d\n\nChecked, nothing found.\n\n", n)
+	}
+}
+
+// kind names what a secret of the given tier is for.
+func kind(tier int) string {
+	if s, ok := kindNames[tier]; ok {
+		return s
+	}
+	return fmt.Sprint(tier)
+}
+
+// firstNote is the detail of a finding's first note evidence, cleaned; "" without one.
+func firstNote(f model.Finding) string {
+	for _, e := range f.Evidence {
+		if e.Kind == "note" {
+			return Clean(e.Detail)
+		}
+	}
+	return ""
+}
+
+// whyNot is the most common first note among the UNCHECKED findings of the item's runs (the
+// first found on a tie); "" without a note.
+func whyNot(r *model.Result, it model.RotationItem) string {
+	n := map[string]int{}
+	best := ""
+	for _, f := range r.Findings {
+		k := firstNote(f)
+		if f.Status != model.Unchecked || k == "" ||
+			!slices.ContainsFunc(it.Runs, func(x model.RunRef) bool { return x.Repo == f.Run.Repo && x.RunID == f.Run.RunID }) {
+			continue
+		}
+		n[k]++
+		if best == "" || n[k] > n[best] {
+			best = k
+		}
+	}
+	return best
+}
+
+// summaryText makes untrusted text safe inside <summary>: one table-safe line of at most
+// 120 characters with HTML and link/code-span characters escaped.
+func summaryText(s string) string {
+	if rs := []rune(s); len(rs) > 120 {
+		s = string(rs[:119]) + "…"
+	}
+	return mdChars.Replace(html.EscapeString(cell(s)))
+}
+
+// mdChars turns the characters that start a link or a code span into entities.
+var mdChars = strings.NewReplacer("[", "&#91;", "]", "&#93;", "`", "&#96;")
+
+// mdItems renders rotation items as a numbered list; mark tells who saw them.
+func mdItems(b *strings.Builder, list []model.RotationItem, mark string) {
+	for i, it := range list {
+		fmt.Fprintf(b, "%d. **%s** · %s  \n   %s  \n   Seen by %s %s\n", i+1, code(it.Name), kind(it.Tier), cell(it.Reason), mark, seenRuns(it.Runs))
+	}
+	b.WriteString("\n")
+}
+
+// seenRuns lists up to three runs as "`repo` run [N](job url) › `job`", then "+N more".
+func seenRuns(runs []model.RunRef) string {
+	var parts []string
+	for i, r := range runs {
+		if i == 3 {
+			parts = append(parts, fmt.Sprintf("+%d more", len(runs)-3))
+			break
+		}
+		s := code(r.Repo)
+		if r.RunID != 0 { // 0: a repository-level finding (runs cap)
+			s += " run " + runLink(r)
+		}
+		if r.Job != "" {
+			s += " › " + code(r.Job)
+		}
+		if r.Attempt > 1 {
+			s += fmt.Sprintf(" attempt %d", r.Attempt)
+		}
+		parts = append(parts, s)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// runLink links the run number (the run ID when unknown) to the job, or to the run without one.
+func runLink(r model.RunRef) string {
+	n := r.RunNumber
+	if n == 0 {
+		n = r.RunID
+	}
+	return link(fmt.Sprint(n), cmp.Or(r.JobURL, r.RunURL))
+}
+
+// mdTable renders findings as a table of repo, workflow › job, run and evidence.
+func mdTable(fs []model.Finding) string {
+	var b strings.Builder
+	b.WriteString("| Repo | Workflow › job | Run | Evidence |\n| --- | --- | --- | --- |\n")
+	for _, f := range fs {
+		var ev []string
+		for _, e := range f.Evidence {
+			ev = append(ev, code(e.Detail))
+		}
+		wf := f.Run.Workflow
+		if strings.HasPrefix(wf, ".github/workflows/") {
+			wf = path.Base(wf)
+		}
+		job := code(wf)
+		if f.Run.Job != "" {
+			job += " › " + code(f.Run.Job)
+		}
+		run := ""
+		if f.Run.RunID != 0 { // 0: a repository-level finding (runs cap)
+			run = runLink(f.Run)
+		}
+		if f.Run.Attempt > 1 {
+			run += fmt.Sprintf(" attempt %d", f.Run.Attempt)
+		}
+		fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", code(f.Run.Repo), job, run, strings.Join(ev, "; "))
+	}
+	return b.String()
 }
 
 // JSON renders the scan result as JSON.
@@ -190,7 +413,8 @@ func JSON(w io.Writer, inc *incident.Incident, r *model.Result) error {
 		Incident *incident.Incident `json:"incident"`
 		*model.Result
 		SecretsUnknown int `json:"secrets_unknown_jobs"`
-	}{inc, r, len(secretsUnknown(r))}); err != nil {
+		CleanJobs      int `json:"clean_jobs"`
+	}{inc, r, len(secretsUnknown(r)), cleanJobs(r)}); err != nil {
 		return err
 	}
 	_, err := w.Write(escapeRe.ReplaceAllFunc(b.Bytes(), func(m []byte) []byte {
