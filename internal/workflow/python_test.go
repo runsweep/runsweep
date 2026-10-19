@@ -75,6 +75,11 @@ func TestPyInstalls(t *testing.T) {
 		`"/my dir/python" -m pip install x`:                      {{tool: "pip install", pkgs: []string{"x"}}},
 		// F4c: case-insensitive
 		"PIP.EXE install x": {{tool: "pip install", pkgs: []string{"x"}}},
+		// R2-2: substitutions inside echo arguments run
+		"echo `pip install -q x`":              {{tool: "pip install", pkgs: []string{"x"}}},
+		"echo \"$(pip install -q x)\"":         {{tool: "pip install", pkgs: []string{"x"}}},
+		"echo `pip install a` `pip install b`": {{tool: "pip install", pkgs: []string{"a"}}, {tool: "pip install", pkgs: []string{"b"}}},
+		"python -c 'import pip'":               {{tool: "python -c", opaque: true}},
 		// F5
 		"echo x | xargs pip install": {{tool: "pip install", dynamic: true}},
 		"pip install x < reqs.txt":   {{tool: "pip install", pkgs: []string{"x"}}},
@@ -122,6 +127,10 @@ func TestHasPythonAndActions(t *testing.T) {
 
 func TestHasPythonF4(t *testing.T) {
 	for name, j := range map[string]*Job{
+		"sudo path":      {Runs: []string{"sudo tools/setup"}},
+		"assign path":    {Runs: []string{"FOO=1 scripts/x"}},
+		"timeout path":   {Runs: []string{"timeout 5 scripts/x"}},
+		"time path":      {Runs: []string{"time scripts/x"}},
 		"script path":    {Runs: []string{"script/bootstrap"}},
 		"after cd":       {Runs: []string{"cd x && scripts/setup"}},
 		"backslash path": {Runs: []string{`tools\setup.cmd`}},
