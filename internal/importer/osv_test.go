@@ -147,7 +147,7 @@ func TestQueryMALFollowsPagesAndKeepsOnlyMAL(t *testing.T) {
 		_, _ = w.Write(page)
 		return true
 	})
-	vs, err := c.QueryMAL(context.Background(), "axios")
+	vs, err := c.QueryMAL(context.Background(), "npm", "axios")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestQueryMALPageCap(t *testing.T) {
 		_, _ = fmt.Fprint(w, `{"next_page_token":"again"}`)
 		return true
 	})
-	if _, err := c.QueryMAL(context.Background(), "axios"); err == nil || !strings.Contains(err.Error(), "more than") {
+	if _, err := c.QueryMAL(context.Background(), "npm", "axios"); err == nil || !strings.Contains(err.Error(), "more than") {
 		t.Fatalf("want page cap error, got %v", err)
 	}
 	if calls.Load() != maxPages {
@@ -174,7 +174,7 @@ func TestQueryMALPageCap(t *testing.T) {
 
 func TestQueryMALRejectsBadName(t *testing.T) {
 	c, calls := fixtures(t, nil)
-	if _, err := c.QueryMAL(context.Background(), "../x"); err == nil || calls.Load() != 0 {
+	if _, err := c.QueryMAL(context.Background(), "npm", "../x"); err == nil || calls.Load() != 0 {
 		t.Fatalf("%v, %d calls", err, calls.Load())
 	}
 }

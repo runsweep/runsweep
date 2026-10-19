@@ -492,6 +492,10 @@ func fixtureImporter(t *testing.T) func() *importer.Client {
 		file := ""
 		if id, ok := strings.CutPrefix(p, "/osv/v1/vulns/"); ok {
 			file = filepath.Join(dir, "osv", id+".json")
+		} else if p == "/osv/v1/query" {
+			var q struct{ Package struct{ Name string } }
+			_ = json.NewDecoder(r.Body).Decode(&q)
+			file = filepath.Join(dir, "osv", "query-"+filepath.Base(q.Package.Name)+".json")
 		} else if name, ok := strings.CutPrefix(p, "/npm/"); ok {
 			file = filepath.Join(dir, "npm", name+".json")
 		}
@@ -604,6 +608,7 @@ func TestImportUsageErrorsNeverTouchNetwork(t *testing.T) {
 		{"incidents", "import"}, // nothing at all (stdin nil)
 		{"incidents", "import", "../x"},
 		{"incidents", "import", "--package", "axios"},
+		{"incidents", "import", "--package", "foo:x"},
 		{"incidents", "import", "--package", "npm:../x"},
 		{"incidents", "import", "--action", "o/r@abc"},
 		{"incidents", "import", "--action", "o/r/x@0e58ed8671d6b60d0890c21b07f8835ace038e67", "--since", "2025-03-14T16:00:00Z", "--until", "2025-03-15T14:00:00Z"},
@@ -849,5 +854,26 @@ func TestEnterpriseHostRefused(t *testing.T) {
 			t.Errorf("%v refused: %d %s", env, code, errb.String())
 		}
 		t.Setenv(env[0], "")
+	}
+}
+
+func TestImportPyPIPackage(t *testing.T) {
+	d := deps{newImporter: fixtureImporter(t)}
+	var out, errb bytes.Buffer
+	if code := run([]string{"incidents", "import", "--package", "pypi:litellm"}, &out, &errb, d); code != 2 ||
+		!strings.Contains(errb.String(), "PyPI does not keep times of removed releases; pass --since and --until") {
+		t.Fatalf("code %d: %s", code, errb.String())
+	}
+	out.Reset()
+	errb.Reset()
+	if code := run([]string{"incidents", "import", "--package", "foo:x"}, &out, &errb, d); code != 2 ||
+		!strings.Contains(errb.String(), "want npm:NAME or pypi:NAME") {
+		t.Fatalf("code %d: %s", code, errb.String())
+	}
+	out.Reset()
+	errb.Reset()
+	if code := run([]string{"incidents", "import", "--package", "pypi:litellm", "--since", "2026-03-24T00:00:00Z", "--until", "2026-03-25T23:59:59Z"}, &out, &errb, d); code != 0 ||
+		!strings.Contains(out.String(), `"litellm"`) {
+		t.Fatalf("code %d: %s\n%s", code, errb.String(), out.String())
 	}
 }

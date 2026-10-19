@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/runsweep/runsweep/internal/pep"
 )
 
 // maxPages bounds OSV query pagination; OSV pages at 1000 vulns or 20 s.
@@ -94,15 +96,20 @@ func (c *Client) Vuln(ctx context.Context, id string) (*Vuln, error) {
 	return &v, nil
 }
 
-// QueryMAL returns the malicious-package (MAL-*) records OSV has for an npm package, following pagination.
-func (c *Client) QueryMAL(ctx context.Context, name string) ([]Vuln, error) {
-	if !ValidNPMName(name) {
-		return nil, fmt.Errorf("invalid npm package name %q", name)
+// QueryMAL returns the malicious-package (MAL-*) records OSV has for a package
+// of ecosystem "npm" or "PyPI", following pagination.
+func (c *Client) QueryMAL(ctx context.Context, ecosystem, name string) ([]Vuln, error) {
+	switch {
+	case ecosystem == "npm" && ValidNPMName(name), ecosystem == "PyPI" && pep.ValidName(name):
+	case ecosystem == "npm" || ecosystem == "PyPI":
+		return nil, fmt.Errorf("invalid %s package name %q", ecosystem, name)
+	default:
+		return nil, fmt.Errorf("unsupported ecosystem %q", ecosystem)
 	}
 	var out []Vuln
 	token := ""
 	for page := 0; page < maxPages; page++ {
-		q := map[string]any{"package": map[string]string{"ecosystem": "npm", "name": name}}
+		q := map[string]any{"package": map[string]string{"ecosystem": ecosystem, "name": name}}
 		if token != "" {
 			q["page_token"] = token
 		}
