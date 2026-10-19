@@ -36,6 +36,49 @@ func TestPyInstalls(t *testing.T) {
 		"poetry lock":                {{tool: "poetry lock", opaque: true}},
 		"pipx install poetry":        {{tool: "pipx install", opaque: true, pkgs: []string{"poetry"}}},
 		"pip mystery-sub":            {{tool: "pip mystery-sub", opaque: true}},
+		// F1: real commands behind wrappers and keywords
+		"if pip install x; then echo ok; fi":              {{tool: "pip install", pkgs: []string{"x"}}},
+		"! pip install x":                                 {{tool: "pip install", pkgs: []string{"x"}}},
+		"PIP_INDEX_URL=https://i.example/s pip install x": {{tool: "pip install", pkgs: []string{"x"}}},
+		"timeout 600 pip install x":                       {{tool: "pip install", pkgs: []string{"x"}}},
+		"command pip install x":                           {{tool: "pip install", pkgs: []string{"x"}}},
+		"sudo -u ci pip install x":                        {{tool: "pip install", pkgs: []string{"x"}}},
+		"bash -c 'pip install x'":                         {{tool: "pip install", pkgs: []string{"x"}}},
+		"poetry run pip install x":                        {{tool: "poetry run", opaque: true}},
+		"conda run -n e pip install x":                    {{tool: "conda run", opaque: true}},
+		"micromamba run -n e pip install x":               {{tool: "micromamba run", opaque: true}},
+		"pdm run pytest":                                  {{tool: "pdm run", opaque: true}},
+		"foo pip install x":                               {{tool: "pip (unrecognised position)", opaque: true}},
+		"# pip install x\nwhich pip\ncommand -v python":   nil,
+		"echo \"# c\"; pip install x":                     {{tool: "pip install", pkgs: []string{"x"}}},
+		// F2: interpreter flags and modules
+		"py -3.12 -m pip install x":      {{tool: "pip install", pkgs: []string{"x"}}},
+		"python -I -m pip install x":     {{tool: "pip install", pkgs: []string{"x"}}},
+		"python3 -mpip install x":        {{tool: "pip install", pkgs: []string{"x"}}},
+		"python -X dev -m pip install x": {{tool: "pip install", pkgs: []string{"x"}}},
+		"pypy3 -m pip install x":         {{tool: "pip install", pkgs: []string{"x"}}},
+		"python -m tox":                  {{tool: "python -m tox", opaque: true}},
+		"python -m nox":                  {{tool: "python -m nox", opaque: true}},
+		"python -m pre_commit run":       {{tool: "python -m pre_commit", opaque: true}},
+		"python -m piptools sync":        {{tool: "python -m piptools", opaque: true}},
+		"python -m uv sync":              {{tool: "uv sync"}},
+		"python -m poetry install":       {{tool: "poetry install"}},
+		"python -m pipx install poetry":  {{tool: "pipx install", opaque: true, pkgs: []string{"poetry"}}},
+		"python -m hatch build":          {{tool: "python -m hatch", opaque: true}},
+		"python -m pdm install":          {{tool: "python -m pdm", opaque: true}},
+		"python setup.py install":        {{tool: "python setup.py install", opaque: true}},
+		"python setup.py bdist_wheel":    {{tool: "python setup.py bdist_wheel", opaque: true}},
+		"python setup.py --version":      nil,
+		// F3: quoted command words
+		`"$VENV/bin/python" -m pip install x`:                    {{tool: "pip install", pkgs: []string{"x"}}},
+		`"${{ steps.py.outputs.python-path }}" -m pip install x`: {{tool: "pip install", pkgs: []string{"x"}}},
+		`"/my dir/python" -m pip install x`:                      {{tool: "pip install", pkgs: []string{"x"}}},
+		// F4c: case-insensitive
+		"PIP.EXE install x": {{tool: "pip install", pkgs: []string{"x"}}},
+		// F5
+		"echo x | xargs pip install": {{tool: "pip install", dynamic: true}},
+		"pip install x < reqs.txt":   {{tool: "pip install", pkgs: []string{"x"}}},
+		"pip install < reqs.txt":     {{tool: "pip install"}},
 		"pip list\npip --version\npython x.py\nuv --version\npoetry config virtualenvs.create false": nil,
 		"echo pip install x": nil, // quoted-free echo argument is not a command word
 	} {
@@ -74,5 +117,39 @@ func TestHasPythonAndActions(t *testing.T) {
 		if c.j.HasPython() != c.has || c.j.PyActionsOK() != c.actOK {
 			t.Errorf("%s: HasPython=%v PyActionsOK=%v", name, c.j.HasPython(), c.j.PyActionsOK())
 		}
+	}
+}
+
+func TestHasPythonF4(t *testing.T) {
+	for name, j := range map[string]*Job{
+		"script path":    {Runs: []string{"script/bootstrap"}},
+		"after cd":       {Runs: []string{"cd x && scripts/setup"}},
+		"backslash path": {Runs: []string{`tools\setup.cmd`}},
+		"shell python":   {Runs: []string{"print(1)"}, Shells: []string{"python {0}"}},
+		"shell template": {Runs: []string{"x"}, Shells: []string{"${{ matrix.shell }}"}},
+		"upper pip":      {Runs: []string{"PIP.EXE install x"}},
+		"pypy":           {Runs: []string{"pypy3 -m pip install x"}},
+	} {
+		if !j.HasPython() {
+			t.Errorf("%s: HasPython=false", name)
+		}
+	}
+	for name, j := range map[string]*Job{
+		"cd path arg": {Runs: []string{"cd a/b\nmkdir -p c/d\necho x/y"}},
+		"bash shell":  {Runs: []string{"go test"}, Shells: []string{"bash", "pwsh", "bash --noprofile -e {0}"}},
+	} {
+		if j.HasPython() {
+			t.Errorf("%s: HasPython=true", name)
+		}
+	}
+}
+
+func TestParseShells(t *testing.T) {
+	w, err := Parse([]byte("defaults:\n  run:\n    shell: bash\njobs:\n  a:\n    defaults:\n      run:\n        shell: pwsh\n    steps:\n      - run: x\n        shell: python {0}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := w.Jobs["a"].Shells; !slices.Equal(got, []string{"bash", "pwsh", "python {0}"}) {
+		t.Errorf("Shells = %q", got)
 	}
 }

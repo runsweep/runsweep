@@ -25,6 +25,7 @@ type Job struct {
 	Call           string   // job-level `uses:`: the reusable workflow this job calls
 	Runs           []string // `run:` scripts
 	Scripts        []string // actions/github-script `script:` inputs
+	Shells         []string // `shell:` of the steps and the job and workflow defaults
 	Inputs         []string // working-directory (step, job and workflow defaults) and step `with:` values
 	Secrets        []string
 	InheritSecrets bool
@@ -151,8 +152,16 @@ func Parse(b []byte) (*Workflow, error) {
 				j.Inputs = append(j.Inputs, d)
 			}
 		}
+		for _, d := range []*yaml.Node{doc, jn} {
+			if sh := scalar(get(get(get(d, "defaults"), "run"), "shell")); sh != "" {
+				j.Shells = append(j.Shells, sh)
+			}
+		}
 		if steps := get(jn, "steps"); steps != nil {
 			for _, st := range steps.Content {
+				if sh := scalar(get(st, "shell")); sh != "" {
+					j.Shells = append(j.Shells, sh)
+				}
 				if u := scalar(get(st, "uses")); u != "" {
 					j.Uses = append(j.Uses, u)
 					j.CloudRoles = append(j.CloudRoles, cloudRoles(u, get(st, "with"))...)
