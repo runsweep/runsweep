@@ -11,7 +11,15 @@ The recording scans [runsweep-demo](https://github.com/runsweep/runsweep-demo) w
 
 ## Install
 
-Download the latest release from [Releases](https://github.com/runsweep/runsweep/releases) and verify it before running it: the archive's checksum (required), the signature of the checksum file (needs [cosign](https://github.com/sigstore/cosign), optional: `brew install cosign`), and its build provenance. Run it in an empty directory, so the globs match only the downloaded files. The commands below are for linux on amd64; on an Apple Silicon Mac use `darwin_arm64` in place of `linux_amd64`.
+With [Homebrew](https://brew.sh) (macOS, Linux):
+
+```bash
+brew install runsweep/tap/runsweep
+```
+
+The cask pins each archive's SHA-256 from the release. The binary is not notarized, so the cask removes the macOS quarantine flag after install.
+
+Or download the latest release from [Releases](https://github.com/runsweep/runsweep/releases) and verify it before running it: the archive's checksum (required), the signature of the checksum file (needs [cosign](https://github.com/sigstore/cosign), optional: `brew install cosign`), and its build provenance. Run it in an empty directory, so the globs match only the downloaded files. The commands below are for linux on amd64; on an Apple Silicon Mac use `darwin_arm64` in place of `linux_amd64`.
 
 ```bash
 gh release download -R runsweep/runsweep -p '*_linux_amd64.tar.gz' -p checksums.txt -p checksums.txt.sigstore.json

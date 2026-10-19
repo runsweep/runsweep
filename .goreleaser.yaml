@@ -22,3 +22,22 @@ signs:
     args: ["sign-blob", "--bundle=${signature}", "${artifact}", "--yes"]
 changelog:
   use: github-native
+homebrew_casks:
+  - name: runsweep
+    description: Which CI runs did a supply-chain incident touch, and which secrets to rotate first
+    homepage: https://github.com/runsweep/runsweep
+    commit_author: {name: runsweep-release, email: noreply@github.com}
+    repository:
+      owner: runsweep
+      name: homebrew-tap
+      branch: main
+      git:
+        url: git@github.com:runsweep/homebrew-tap.git
+        private_key: "{{ .Env.HOMEBREW_TAP_DEPLOY_KEY }}"
+    # the binary is not notarized; the cask checks its sha256 instead
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/runsweep"]
+          end
