@@ -239,7 +239,7 @@ func ref(repo string, r source.Run, j source.Job) model.RunRef {
 	if attempt == 0 { // run-level finding: no job
 		attempt = r.Attempt
 	}
-	return model.RunRef{Repo: repo, RunID: r.ID, Workflow: r.Path, HeadSHA: r.HeadSHA, RunURL: r.URL,
+	return model.RunRef{Repo: repo, RunID: r.ID, RunNumber: r.Number, Workflow: r.Path, HeadSHA: r.HeadSHA, RunURL: r.URL,
 		CreatedAt: r.CreatedAt, JobID: j.ID, Job: j.Name, JobURL: j.URL, Attempt: attempt}
 }
 

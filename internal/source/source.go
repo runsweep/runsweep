@@ -42,6 +42,7 @@ func Parse(f func()) {
 // Run is a workflow run.
 type Run struct {
 	ID        int64
+	Number    int64  // run number within the workflow; 0 if the API omitted it
 	Name      string // workflow name
 	Path      string // e.g. .github/workflows/ci.yml
 	HeadSHA   string
