@@ -384,6 +384,8 @@ func TestParseLogQuietSegments(t *testing.T) {
 		"pip install x `\n  | Out-Null":                       false,
 		"cat r.txt | pip install -q -r /dev/stdin":            false,
 		"pip install x=='1' | tail":                           false,
+		"f() { pip install x; }\nf | tail":                    false,
+		"function f {\n  pip install x\n}\nf > /dev/null":     false,
 		"pip install \"numpy>1.20\"":                          true,
 		"pip install -r r.txt && pytest -q":                   true,
 		"pip install x 2>err.txt":                             true,

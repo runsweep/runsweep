@@ -389,6 +389,7 @@ var (
 	textWords = map[string]bool{"echo": true, "printf": true, "print": true, "cat": true}
 	leadWords = map[string]bool{"then": true, "do": true, "else": true, "if": true, "elif": true, "while": true, "until": true, "!": true}
 	endWords  = map[string]bool{"fi": true, "done": true, "esac": true}
+	funcRe    = regexp.MustCompile(`(?:^|[\s;&|])(?:function\s+[\w.:-]+|[\w.:-]+\s*\(\s*\))`) // a shell function definition
 )
 
 // joinLines joins shell (\) and PowerShell (`) continued lines. A line ending in a backtick
@@ -414,6 +415,9 @@ func joinLines(script string) string {
 // done to its enclosing group, if-block or loop).
 func quietOutput(script string) bool {
 	script = joinLines(script)
+	if funcRe.MatchString(script) {
+		return true // ponytail: a shell function's output may be piped where it is called; not followed
+	}
 	found := 0
 	for _, seg := range segments(script) {
 		text := strings.TrimSpace(seg.text)
