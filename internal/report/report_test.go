@@ -679,3 +679,14 @@ func TestMarkdownRunLinkNeverUntrusted(t *testing.T) {
 		t.Fatalf("an unlinkable run keeps its number as plain text:\n%s", out)
 	}
 }
+
+// An AFFECTED verdict with no confirmed secret says so before pointing elsewhere.
+func TestMarkdownAffectedWithoutConfirmedSecret(t *testing.T) {
+	inc, res := sample()
+	for i := range res.Rotation {
+		res.Rotation[i].Confirmed = false
+	}
+	if out := render(t, inc, res); !strings.Contains(out, "> **Exposed: 1 job ran a compromised package or action.**  \n> The AFFECTED jobs are not confirmed to have read any secret. Review the secrets under *Also review* and *Not verified*.\n") {
+		t.Fatalf("%s", out)
+	}
+}
