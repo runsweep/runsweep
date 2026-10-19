@@ -145,3 +145,45 @@ func TestScanPyPIEvents(t *testing.T) {
 		t.Errorf("mixed npm: %+v", fd)
 	}
 }
+
+func TestScanPyPIFinalReview(t *testing.T) {
+	run := func(script string) string {
+		return "      - run: |\n          " + strings.ReplaceAll(script, "\n", "\n          ") + "\n"
+	}
+	sp := "      - uses: actions/setup-python@v5\n"
+	setupLog := pyStep("actions/setup-python@v5")
+	f3 := "# don't run twice\ninst() { pip install -r requirements-$1.txt; }\ninst dev\ninst test > /dev/null\necho 'done'"
+	starter := "python -m pip install --upgrade pip\npip install flake8 pytest\nif [ -f requirements.txt ]; then pip install -r requirements.txt; fi"
+	for name, c := range map[string]struct {
+		f      *sourcetest.Fake
+		status model.Status
+	}{
+		// C1: a closed substitution before the command word
+		"assign subst":      {pyFx(run("X=$(cat f) pip install -q -r requirements.txt"), pyStep("X=$(cat f) pip install -q -r requirements.txt")), model.Unchecked},
+		"assign subst pkgs": {pyFx(run("PYTHONPATH=$(dirname .) pip install -q litellm"), pyStep("PYTHONPATH=$(dirname .) pip install -q litellm")), model.Possible},
+		"which python":      {pyFx(sp+run("$(which python) -m pip install -q -r requirements.txt"), setupLog+pyStep("$(which python) -m pip install -q -r requirements.txt")), model.Unchecked},
+		"which quoted":      {pyFx(run(`"$(which python)" -m pip install -q -r requirements.txt`), pyStep(`"$(which python)" -m pip install -q -r requirements.txt`)), model.Unchecked},
+		"command -v":        {pyFx(run("$(command -v python3) -m pip install -q -r requirements.txt"), pyStep("$(command -v python3) -m pip install -q -r requirements.txt")), model.Unchecked},
+		"sudo which pip":    {pyFx(run("sudo $(which pip) install -q x"), pyStep("sudo $(which pip) install -q x")), model.Unchecked},
+		// C2: an apostrophe in a comment does not hide a function definition
+		"function F3": {pyFx(run(f3), pyStep(f3, "Successfully installed six-1.17.0")), model.Unchecked},
+		// C3: an install command printed by make or set -x
+		"make echoes":       {pyFx(run("make deps"), pyStep("make deps", "pip install -q -r requirements.txt")), model.Unchecked},
+		"make echoes setup": {pyFx(sp+run("make deps"), setupLog+pyStep("make deps", "python -m pip install -q -r requirements.txt")), model.Unchecked},
+		"xtrace":            {pyFx(sp+run("./ci/install.sh"), setupLog+pyStep("./ci/install.sh", "+ pip install -q -r requirements.txt")), model.Unchecked},
+		// I2: setup-python pip-install
+		"setup pip-install": {pyFx("      - uses: actions/setup-python@v5\n        with:\n          pip-install: -q litellm\n"+run("pytest"),
+			lts+"##[group]Run actions/setup-python@v5\n"+lts+"with:\n"+lts+"  pip-install: -q litellm\n"+lts+"##[endgroup]\n"+pyStep("pytest")), model.Unchecked},
+		// I3: the GitHub "Python application" starter
+		"starter pip current": {pyFx(sp+run(starter), setupLog+pyStep(starter, "Requirement already satisfied: pip in /x (25.3)",
+			"Successfully installed flake8-7.1.0 pytest-8.3.0", "Successfully installed six-1.17.0")), model.Clean},
+		"starter no requirements": {pyFx(sp+run(starter), setupLog+pyStep(starter, "Successfully installed pip-25.3",
+			"Successfully installed flake8-7.1.0 pytest-8.3.0")), model.Clean},
+		// M2: a default value names the installer
+		"default installer": {pyFx(run(`"${PIP_CMD:-pip}" install -q -r r.txt`), pyStep(`"${PIP_CMD:-pip}" install -q -r r.txt`)), model.Unchecked},
+	} {
+		if fd := scanAny(t, c.f, pypiOnly); fd.Status != c.status {
+			t.Errorf("%s: %v, want %v (%+v)", name, fd.Status, c.status, fd)
+		}
+	}
+}

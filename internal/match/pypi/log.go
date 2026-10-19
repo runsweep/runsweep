@@ -4,6 +4,7 @@ package pypi
 
 import (
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -65,9 +66,9 @@ type section struct {
 	echo     bool // inside the header (until ##[endgroup])
 	blocks   int  // full version lists seen
 	partial  bool
-	have     bool // Requirement already satisfied lines seen
-	pipDone  bool
-	uvWant   int // packages "Installed N packages" announced
+	rasTail  bool           // "Requirement already satisfied" lines after the last "Successfully installed"
+	rasTop   map[string]int // packages "Requirement already satisfied" names as requested, not as a dependency
+	uvWant   int            // packages "Installed N packages" announced
 	uvOpen   bool
 	uvNames  map[string]bool // distinct packages listed since then
 	uvSeen   bool            // an "Installed N" or "Audited" block was printed
@@ -78,7 +79,8 @@ type section struct {
 	poWant   int
 	poOpen   bool
 	poNames  map[string]bool
-	setup    bool // a Python setup action: needs no full list
+	setup    bool   // a Python setup action: needs no full list
+	pipArgs  string // the pip-install input of actions/setup-python
 	hdr      string
 	echoText []string
 }
@@ -120,15 +122,20 @@ func (s *section) finish() Section {
 	if s.resolved && !s.uvSeen {
 		s.partial = true // uv resolved but printed no list of what it installed
 	}
-	if s.have && !s.pipDone {
-		s.blocks++ // everything was already there; versions listed
-	}
 	out := s.Section
 	if !out.Python {
 		return out
 	}
-	cmds, dynamic := 0, false
-	for _, in := range workflow.PyInstalls(out.Cmd) {
+	script := out.Cmd
+	if s.setup {
+		if s.pipArgs == "" {
+			out.Complete = true // the action's own installs need no list
+			return out
+		}
+		script = "pip install " + s.pipArgs // setup-python installs its pip-install input like a step would
+	}
+	cmds, dynamic, named := 0, false, 0
+	for _, in := range workflow.PyInstalls(script) {
 		if in.Opaque && out.Opaque == "" {
 			out.Opaque = in.Tool
 		}
@@ -136,14 +143,22 @@ func (s *section) finish() Section {
 			cmds++
 		}
 		dynamic = dynamic || in.Dynamic
+		if in.Named && !slices.ContainsFunc(in.Pkgs, func(p string) bool { return s.rasTop[p] == 0 }) {
+			// every package it names was already satisfied: its listing is those lines
+			named++
+			for _, p := range in.Pkgs {
+				s.rasTop[p]--
+			}
+		}
 	}
-	loop := cmds > 0 && loopRe.MatchString(out.Cmd)
-	cmds -= alternatives(out.Cmd)
-	if s.setup {
-		out.Complete = out.Opaque == ""
-		return out
+	if s.rasTail {
+		named = max(named, 1) // a series after the last "Successfully installed" is a pip run of its own
 	}
-	if s.envQuiet || envQuiet(out.Cmd) {
+	// ponytail: the named and the trailing series may be one; max is the safe count, summing them needs output order
+	s.blocks += named
+	loop := cmds > 0 && loopRe.MatchString(script)
+	need := cmds - alternatives(script)
+	if s.envQuiet || envQuiet(script) {
 		return out // quiet by environment: versions may go unprinted
 	}
 	if cmds == 0 {
@@ -153,8 +168,8 @@ func (s *section) finish() Section {
 	}
 	// a listing is proof only for commands seen in the script: none, a script run beside them, or
 	// a command that hides its output leave versions unaccounted for
-	out.Complete = out.Opaque == "" && !s.partial && !dynamic && !loop && s.blocks >= cmds &&
-		!workflow.RunsScript(out.Cmd) && !quietOutput(out.Cmd, s.pwsh)
+	out.Complete = out.Opaque == "" && !s.partial && !dynamic && !loop && s.blocks >= need &&
+		!workflow.RunsScript(script) && !quietOutput(script, s.pwsh)
 	return out
 }
 
@@ -189,8 +204,9 @@ type group struct {
 // segments splits a script into commands on newlines, ;, &&, ||, groups and substitutions,
 // outside quotes, and drops comments and heredoc bodies. Pipes and redirects stay in their
 // segment. quiet is true when the script cannot be followed: an open quote, group or heredoc at
-// the end, or a heredoc fed to a command that may run it (bash <<EOF, cat <<EOF | sh). In
-// PowerShell (pwsh), a backtick inside "…" escapes the next character.
+// the end, a heredoc fed to a command that may run it (bash <<EOF, cat <<EOF | sh), or a shell
+// function definition (its output may be piped where it is called; not followed). In PowerShell
+// (pwsh), a backtick inside "…" escapes the next character.
 func segments(script string, pwsh bool) (segs []segment, quiet bool) {
 	type heredoc struct {
 		word string
@@ -306,6 +322,10 @@ func segments(script string, pwsh bool) (segs []segment, quiet bool) {
 			param++
 			cur.WriteString("${")
 		case c == '(':
+			if f := strings.Fields(cur.String()); len(f) > 0 && funcNameRe.MatchString(f[len(f)-1]) &&
+				strings.HasPrefix(strings.TrimLeft(script[i+1:], " \t"), ")") {
+				quiet = true // name() { …; }: a function definition (arr=(), $(), $x.Trim() are not)
+			}
 			open('(')
 		case c == ')':
 			if t := top(); t == '(' || t == '$' {
@@ -325,7 +345,8 @@ func segments(script string, pwsh bool) (segs []segment, quiet bool) {
 		}
 	}
 	cut()
-	if quote != 0 || len(stack) > 0 || param > 0 || len(pending) > 0 {
+	if quote != 0 || len(stack) > 0 || param > 0 || len(pending) > 0 ||
+		slices.ContainsFunc(segs, func(s segment) bool { return funcRe.MatchString(s.text) }) {
 		quiet = true
 	}
 	for _, g := range groups {
@@ -503,9 +524,11 @@ var (
 	textWords   = map[string]bool{"echo": true, "printf": true, "print": true, "cat": true}
 	leadWords   = map[string]bool{"then": true, "do": true, "else": true, "if": true, "elif": true, "while": true, "until": true, "!": true}
 	endWords    = map[string]bool{"fi": true, "done": true, "esac": true}
+	pipInputRe  = regexp.MustCompile(`^\s*pip-install: (.*\S)`) // the pip-install input in a setup-python header
 	pwshShellRe = regexp.MustCompile(`(?i)^\s*shell: .*\b(?:pwsh|powershell)\b`)
 	pwshTextRe  = regexp.MustCompile(`(?i)write-host|\$env:|\|\s*out-null|\*>\s*\$null`)
-	funcRe      = regexp.MustCompile(`(?:^|[\s;&|])(?:function\s+[\w.:-]+|[\w.:-]+\s*\(\s*\))`) // a shell function definition
+	funcRe      = regexp.MustCompile(`^\s*function\s`) // a shell function definition by keyword
+	funcNameRe  = regexp.MustCompile(`^[A-Za-z_][\w.:-]*$`)
 )
 
 // joinLines joins shell (\) and PowerShell (`) continued lines. A line ending in a backtick
@@ -531,9 +554,6 @@ func joinLines(script string) string {
 // done to its enclosing group, if-block or loop).
 func quietOutput(script string, pwsh bool) bool {
 	script = joinLines(script)
-	if funcRe.MatchString(quotedRe.ReplaceAllString(script, "")) {
-		return true // ponytail: a shell function's output may be piped where it is called; not followed
-	}
 	segs, quiet := segments(script, pwsh || pwshTextRe.MatchString(script))
 	if quiet {
 		return true
@@ -573,8 +593,10 @@ func quietOutput(script string, pwsh bool) bool {
 	return found < countInstalls(script) // an install no segment accounts for: assume the worst
 }
 
-// alternatives counts install commands that never run together: a script with a single
-// if/else/fi runs one branch, so only the larger one needs a listing. Any other shape counts 0.
+// alternatives counts install commands that may not run: a script with a single if/else/fi runs
+// one branch, so only the larger one needs a listing; a single if/fi without else may skip its
+// branch (if [ -f requirements.txt ]; then pip install -r requirements.txt; fi). Any other shape
+// counts 0.
 func alternatives(script string) int {
 	lines := strings.Split(script, "\n")
 	ifAt, elseAt, fiAt := -1, -1, -1
@@ -599,10 +621,7 @@ func alternatives(script string) int {
 			return 0
 		}
 	}
-	if ifAt < 0 || elseAt < ifAt || fiAt < elseAt {
-		return 0
-	}
-	count := func(ls []string) int {
+	count := func(ls ...string) int {
 		n := 0
 		for _, in := range workflow.PyInstalls(strings.Join(ls, "\n")) {
 			if !in.Opaque {
@@ -611,13 +630,29 @@ func alternatives(script string) int {
 		}
 		return n
 	}
-	return min(count(lines[ifAt+1:elseAt]), count(lines[elseAt+1:fiAt]))
+	switch {
+	case ifAt < 0:
+	case elseAt < 0 && fiAt < 0:
+		if m := oneLineIfRe.FindStringSubmatch(strings.TrimSpace(lines[ifAt])); m != nil && !nestedRe.MatchString(m[1]) {
+			return count(m[1])
+		}
+	case elseAt < 0 && fiAt > ifAt:
+		return count(lines[ifAt+1 : fiAt]...)
+	case elseAt > ifAt && fiAt > elseAt:
+		return min(count(lines[ifAt+1:elseAt]...), count(lines[elseAt+1:fiAt]...))
+	}
+	return 0
 }
+
+var (
+	oneLineIfRe = regexp.MustCompile(`^if [^;]*;\s*then\s(.*?);?\s*fi$`) // if COND; then BODY; fi on one line
+	nestedRe    = regexp.MustCompile(`\b(?:if|then|else|elif|fi)\b`)
+)
 
 // ParseLog reads a job log. Line numbers are those of the raw log.
 func ParseLog(log string) Log {
 	var l Log
-	cur := &section{}
+	cur := &section{rasTop: map[string]int{}}
 	n := 0
 	for log != "" {
 		var raw string
@@ -627,7 +662,7 @@ func ParseLog(log string) Log {
 		if !cur.echo && strings.Contains(raw, "##[group]Run ") {
 			l.Sections = append(l.Sections, cur.finish())
 			_, hdr, _ := strings.Cut(raw, "##[group]Run ")
-			cur = &section{Section: Section{Line: n}, echo: true, hdr: hdr}
+			cur = &section{Section: Section{Line: n}, echo: true, hdr: hdr, rasTop: map[string]int{}}
 			low := strings.ToLower(hdr)
 			cur.setup = strings.HasPrefix(low, "actions/setup-python@") || strings.HasPrefix(low, "astral-sh/setup-uv@")
 			cur.Python = cur.setup
@@ -648,6 +683,9 @@ func ParseLog(log string) Log {
 				cur.envQuiet = true
 			}
 			cur.pwsh = cur.pwsh || pwshShellRe.MatchString(hl)
+			if m := pipInputRe.FindStringSubmatch(hl); m != nil && cur.setup {
+				cur.pipArgs = m[1]
+			}
 		}
 		if !containsAny(raw, lineLiterals) {
 			continue
@@ -692,7 +730,7 @@ func (l *Log) parseLine(cur *section, line string, n int) {
 	case setupUVRe.MatchString(line):
 	case pipDoneRe.MatchString(line):
 		install()
-		cur.pipDone = true
+		cur.rasTail = false
 		ok := true
 		for _, tok := range strings.Fields(pipDoneRe.FindStringSubmatch(line)[1]) {
 			name, ver, split := splitNameVersion(tok)
@@ -711,7 +749,10 @@ func (l *Log) parseLine(cur *section, line string, n int) {
 	case pipHaveRe.MatchString(line):
 		install()
 		m := pipHaveRe.FindStringSubmatch(line)
-		cur.have = true
+		cur.rasTail = true
+		if !strings.Contains(line, "(from ") {
+			cur.rasTop[pep.Name(m[1])]++
+		}
 		if !l.add(m[1], m[2], n, line) {
 			cur.partial = true
 		}
@@ -764,9 +805,21 @@ func (l *Log) parseLine(cur *section, line string, n int) {
 		install()
 		cur.uvSeen = cur.uvSeen || strings.Contains(line, "Audited")
 		cur.partial = true
+	case echoesInstall(line):
+		install() // make or set -x printed an install command: its output is the step's
 	case callsInstaller(line):
 		l.Calls = true
 	}
+}
+
+// echoesInstall reports whether an output line holds an install command (make echoing a recipe,
+// set -x, a runner "[command]" line): an install or a tool that always installs, not a bare tool
+// word (a "Python 3.12" banner, "pip 24.0 from …", pip's update notice).
+func echoesInstall(line string) bool {
+	t := strings.TrimLeft(strings.TrimPrefix(strings.TrimSpace(line), "[command]"), "+ ")
+	return slices.ContainsFunc(workflow.PyInstalls(t), func(in workflow.PyInstall) bool {
+		return !in.Opaque || workflow.AlwaysInstalls(in.Tool)
+	})
 }
 
 // callsInstaller reports whether an output line starts with a Python tool word (a runner

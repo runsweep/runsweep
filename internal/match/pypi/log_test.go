@@ -454,3 +454,77 @@ func TestParseLogQuietRound5(t *testing.T) {
 		t.Error("function definition not quiet")
 	}
 }
+
+func TestParseLogFinalReview(t *testing.T) {
+	// C2: a function definition is found outside comments and quotes, whatever a comment holds
+	for _, script := range []string{
+		"# don't run twice\ninst() { pip install -r requirements-$1.txt; }\ninst dev\ninst test > /dev/null\necho 'done'",
+		"inst () {\n  pip install -r r.txt\n}\ninst > /dev/null",
+		"function inst {\n  pip install -r r.txt\n}\ninst | tail -1",
+	} {
+		if !quietOutput(script, false) {
+			t.Errorf("%q: function definition not quiet", script)
+		}
+	}
+	for _, script := range []string{"arr=()\npip install x", "echo 'f() { }'\npip install x", "# f() {\npip install x", "$v = $x.Trim()\npip install x"} {
+		if quietOutput(script, false) {
+			t.Errorf("%q: quiet", script)
+		}
+	}
+	setup := func(with string, out ...string) string {
+		log := ts + "##[group]Run actions/setup-python@v5\n" + ts + "with:\n" + ts + "  python-version: 3.12\n"
+		if with != "" {
+			log += ts + "  " + with + "\n"
+		}
+		log += ts + "  check-latest: false\n" + ts + "##[endgroup]\n"
+		for _, l := range out {
+			log += ts + l + "\n"
+		}
+		return log
+	}
+	for name, c := range map[string]struct {
+		log      string
+		python   bool
+		complete bool
+	}{
+		// C3: an install command printed in the output (make, set -x) makes the step Python
+		"make echoes quiet pip":   {step("make deps", "pip install -q -r requirements.txt"), true, false},
+		"make echoes python -m":   {step("make deps", "python -m pip install -q -r requirements.txt"), true, false},
+		"xtrace quiet pip":        {step("./ci/install.sh", "+ pip install -q -r requirements.txt"), true, false},
+		"xtrace nested":           {step("./ci/install.sh", "++ uv sync --quiet"), true, false},
+		"make echoes tox":         {step("make lint", "tox -e lint", "lint: OK"), true, false},
+		"make prints listing":     {step("make deps", "pip install -r requirements.txt", "Successfully installed six-1.17.0"), true, false},
+		"banners are not install": {step("make test", "Python 3.12.1", "pip 24.0 from /x (python 3.12)", "[notice] A new release of pip is available: 24.0 -> 25.2", "[notice] To update, run: python.exe -m pip install --upgrade pip", "[notice] To update, run: pip install --upgrade pip", "Using Python 3.12.1 environment at: /x"), false, true},
+		"echoed text":             {step("make help", "echo pip install x", "run: pip install x"), false, true},
+		// I2: setup-python's pip-install input is an install command of its own
+		"setup no pip-install":     {setup(""), true, true},
+		"setup pip-install quiet":  {setup("pip-install: -q litellm", "Successfully installed litellm-1.82.9"), true, false},
+		"setup pip-install silent": {setup("pip-install: litellm"), true, false},
+		"setup pip-install listed": {setup("pip-install: litellm", "Successfully installed litellm-1.82.9"), true, true},
+		// I3: "Requirement already satisfied" is one listing per pip invocation that it accounts for
+		"starter pip current":            {step(starter, "Requirement already satisfied: pip in /x (25.3)", "Successfully installed flake8-7 pytest-8", "Successfully installed six-1.17.0"), true, true},
+		"starter no requirements":        {step(starter, "Successfully installed pip-25.3", "Successfully installed flake8-7 pytest-8"), true, true},
+		"starter pip current no req":     {step(starter, "Requirement already satisfied: pip in /x (25.3)", "Successfully installed flake8-7 pytest-8"), true, true},
+		"starter all satisfied":          {step(starter, "Requirement already satisfied: pip in /x (25.3)", "Requirement already satisfied: flake8 in /x (7)", "Requirement already satisfied: pytest in /x (8)"), true, true},
+		"starter silent":                 {step(starter, "Successfully installed flake8-7 pytest-8"), true, false},
+		"requirements satisfied after":   {step(upgrade+"\npip install -r requirements.txt", "Successfully installed pip-25.3", "Requirement already satisfied: six in /x (from -r requirements.txt (line 1)) (1.17.0)"), true, true},
+		"requirements satisfied before":  {step(upgrade+"\npip install -r requirements.txt", "Requirement already satisfied: six in /x (from -r requirements.txt (line 1)) (1.17.0)", "Successfully installed pip-25.3"), true, false},
+		"one series for two":             {step(upgrade+"\npip install -r requirements.txt", "Requirement already satisfied: pip in /x (25.3)"), true, false},
+		"dependency line is not a named": {step(upgrade+"\npip install flake8", "Requirement already satisfied: pip in /x (from flake8) (25.3)", "Successfully installed flake8-7"), true, false},
+		"named needs every package":      {step("pip install a b\npip install c", "Requirement already satisfied: a in /x (1)", "Successfully installed c-1"), true, false},
+		"if without else runs":           {step("if [ -f r.txt ]; then pip install -r r.txt; fi", "Successfully installed six-1.17.0"), true, true},
+		"if without else, silent other":  {step("if [ -f r.txt ]; then\n  pip install -r r.txt\nfi\npip install x"), true, false},
+		"if without else, other listed":  {step("if [ -f r.txt ]; then\n  pip install -r r.txt\nfi\npip install x", "Successfully installed x-1"), true, true},
+		"one-line if with else":          {step("if [ -f r.txt ]; then pip install -r r.txt; else pip install y; fi\npip install x", "Successfully installed x-1"), true, false},
+	} {
+		l := ParseLog(c.log)
+		if len(l.Sections) != 2 || l.Sections[1].Python != c.python || c.python && l.Sections[1].Complete != c.complete {
+			t.Errorf("%s: %+v", name, l.Sections)
+		}
+	}
+}
+
+const (
+	upgrade = "python -m pip install --upgrade pip"
+	starter = upgrade + "\npip install flake8 pytest\nif [ -f requirements.txt ]; then pip install -r requirements.txt; fi"
+)
