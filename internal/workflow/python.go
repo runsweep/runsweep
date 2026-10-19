@@ -10,10 +10,13 @@ import (
 )
 
 // pyWordRe is a Python tool word, case-insensitively, with its version (ABI flags and -dbg
-// included) and a Windows suffix (.exe, .bat, .cmd, .ps1). pyWords
+// included) and a Windows suffix (.exe, .bat, .cmd, .ps1), anchored at a word start. pyWords
 // checks its neighbours in code: the regexp never consumes them, so quotes, paths and adjacent
 // words never hide an occurrence.
-var pyWordRe = regexp.MustCompile(`(?i)(?:pip-sync|pip-compile|pre-commit|cibuildwheel|micromamba|pipenv|python(?:\d+(?:\.\d+)*[dmt]*)?(?:-dbg)?|pypy(?:\d+(?:\.\d+)*[dmt]*)?(?:-dbg)?|pipx|pip(?:\d+(?:\.\d+)*)?|poetry|pixi|py|uvx|uv|pdm|hatch|tox|nox|conda|mamba|rye|flit|maturin)(?:\.(?:exe|bat|cmd|ps1))?`)
+var pyWordRe = regexp.MustCompile(`^(?i)(?:pip-sync|pip-compile|pre-commit|cibuildwheel|micromamba|pipenv|python(?:\d+(?:\.\d+)*[dmt]*)?(?:-dbg)?|pypy(?:\d+(?:\.\d+)*[dmt]*)?(?:-dbg)?|pipx|pip(?:\d+(?:\.\d+)*)?|poetry|pixi|py|uvx|uv|pdm|hatch|tox|nox|conda|mamba|rye|flit|maturin)(?:\.(?:exe|bat|cmd|ps1))?`)
+
+// pyWordFirst holds the first letters of the tool words, lower case.
+const pyWordFirst = "pcmuhtnrf"
 
 func pyWordByte(c byte) bool {
 	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-'
@@ -21,25 +24,35 @@ func pyWordByte(c byte) bool {
 
 // pyWords returns the [start, end) of every Python tool word in text: not preceded by a word
 // character or '.', not followed by a word character, a path separator (python/ is a directory),
-// '=' (PYTHON=… names a variable; the value stays a word) or a file extension (uv.lock, tox.ini). A '/' or '\' before the word is a path to it.
+// '=' (PYTHON=… names a variable; the value stays a word) or a file extension (uv.lock, tox.ini). A '/' or '\' before the word is a path to it,
+// and ":-" or ":=" a default value (${PIP_CMD:-pip}). The regexp runs only at word starts, so a
+// long text costs linear time.
 func pyWords(text string) [][]int {
 	var out [][]int
-	for _, m := range pyWordRe.FindAllStringIndex(text, -1) {
-		s, e := m[0], m[1]
-		if s > 0 && (pyWordByte(text[s-1]) || text[s-1] == '.') {
+	for s := 0; s < len(text); s++ {
+		if s > 0 && (pyWordByte(text[s-1]) || text[s-1] == '.') && (s < 2 || text[s-2] != ':' || text[s-1] != '-' && text[s-1] != '=') {
+			continue // ${PIP:-pip}: a default value is a word
+		}
+		if strings.IndexByte(pyWordFirst, text[s]|0x20) < 0 {
 			continue
 		}
+		m := pyWordRe.FindStringIndex(text[s:])
+		if m == nil {
+			continue
+		}
+		e := s + m[1]
 		if e < len(text) && (pyWordByte(text[e]) || text[e] == '/' || text[e] == '\\' || text[e] == '=' ||
 			text[e] == '.' && e+1 < len(text) && pyWordByte(text[e+1]) && text[e+1] != '-' && text[e+1] != '_') {
 			continue
 		}
-		out = append(out, m)
+		out = append(out, []int{s, e})
+		s = e - 1
 	}
 	return out
 }
 
 const (
-	pyAssign = `[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|\S*)`
+	pyAssign = `[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|\$\([^()]*\)|[^\s"'])*`
 	// wrappers that run the next word as a command
 	pyWrap = `(?:` + pyAssign + `\s+|!\s+` +
 		`|sudo\b(?:\s+(?:-[ugCDhpRrt]\s+\S+|-\S+|` + pyAssign + `))*\s+` +
@@ -75,6 +88,7 @@ type PyInstall struct {
 	Pkgs    []string // PEP 503 names given as arguments
 	Dynamic bool     // a package named by a variable or substitution
 	Opaque  bool
+	Named   bool // installs only the packages in Pkgs: no requirements file, editable, path or URL
 }
 
 var (
@@ -110,40 +124,59 @@ func PyInstalls(text string) []PyInstall {
 
 // pyScan is PyInstalls on joined lines. spans are the [start, end) ranges whose tool words were
 // read as part of a command (an accepted command, an unrecognised word, the own flags of uv run);
-// skipped are the word starts left out as comment or echo-like text.
-func pyScan(text string) (out []PyInstall, spans [][2]int, skipped []int) {
+// skipped are the word starts left out as comment or echo-like text, each with the start of the
+// echo-like word that heads its command (-1 for a comment).
+func pyScan(text string) (out []PyInstall, spans [][2]int, skipped [][2]int) {
 	inside := 0 // end of the last Python command: its inner words are not commands of their own
 	runAt := -1 // start of the command run by the last uv run / poetry run: a command start
 	words := pyWords(text)
-	if len(words) > maxMatches {
-		return []PyInstall{{Cmd: text, Tool: "more than " + strconv.Itoa(maxMatches) + " Python tool words", Opaque: true}}, [][2]int{{0, len(text)}}, nil
+	all := func(why string) ([]PyInstall, [][2]int, [][2]int) {
+		return []PyInstall{{Cmd: text, Tool: why, Opaque: true}}, [][2]int{{0, len(text)}}, nil
 	}
+	if len(words) > maxMatches {
+		return all("more than " + strconv.Itoa(maxMatches) + " Python tool words")
+	}
+	lineStart, lineEnd := 0, -1
 	for _, m := range words {
 		wordStart, wordEnd := m[0], m[1]
 		if wordStart < inside {
 			continue
 		}
-		lineStart := strings.LastIndexByte(text[:wordStart], '\n') + 1
+		if wordStart > lineEnd { // the first word of a line: every later one shares its bounds
+			lineStart = strings.LastIndexByte(text[:wordStart], '\n') + 1
+			lineEnd = len(text)
+			if i := strings.IndexByte(text[wordStart:], '\n'); i >= 0 {
+				lineEnd = wordStart + i
+			}
+			if lineEnd-lineStart > pyMaxLine {
+				return all("a line over " + strconv.Itoa(pyMaxLine) + " bytes") // keeps the scan linear
+			}
+		}
 		cmdStart := pyCmdStart(text, lineStart, wordStart)
 		linePrefix := text[lineStart:cmdStart]
 		prefix := linePrefix
-		if runAt >= lineStart && runAt <= cmdStart {
+		if runAt >= lineStart && runAt <= cmdStart && !strings.ContainsAny(text[runAt:cmdStart], ")`") {
 			prefix = text[runAt:cmdStart] // uv run sh -c '…': the inner command is a command line of its own
 		}
 		if pyComment(linePrefix) {
-			skipped = append(skipped, wordStart)
+			skipped = append(skipped, [2]int{wordStart, -1})
 			continue
 		}
-		seg := prefix
-		if i := strings.LastIndexAny(seg, ";&|({`"); i >= 0 {
-			seg = seg[i+1:]
-		}
-		lead := strings.Fields(seg)
-		for len(lead) > 0 && pyLeadWord[lead[0]] {
-			lead = lead[1:]
-		}
-		if len(lead) > 0 && (pyNoCmd[lead[0]] || lead[0] == "command" && len(lead) > 1 && (lead[1] == "-v" || lead[1] == "-V")) {
-			skipped = append(skipped, wordStart)
+		cut, sub := pyHead(prefix)
+		head := prefix[cut:]
+		lead, leadAt := pyLead(head)
+		if pyNoCmd[lead[0]] || lead[0] == "command" && (lead[1] == "-v" || lead[1] == "-V") {
+			outer := prefix[:max(sub, 0)]
+			if i := strings.LastIndexAny(outer, ";&|`"); i >= 0 {
+				outer = outer[i:]
+			}
+			if sub >= 0 && pyStartRe.MatchString(outer) {
+				// sudo $(which pip) install x: the substitution is the command word
+				spans = append(spans, [2]int{wordStart, wordEnd})
+				out = append(out, PyInstall{Cmd: strings.TrimSpace(text[lineStart:lineEnd]), Tool: text[wordStart:wordEnd] + " (command substitution)", Opaque: true})
+				continue
+			}
+			skipped = append(skipped, [2]int{wordStart, cmdStart - len(prefix) + cut + leadAt})
 			continue // echo pip install x: an argument, not a command
 		}
 		tool := strings.ToLower(text[wordStart:wordEnd])
@@ -157,7 +190,7 @@ func pyScan(text string) (out []PyInstall, spans [][2]int, skipped []int) {
 			quote = false
 		}
 		restStart := len(text) - len(rest)
-		if i := strings.IndexByte(rest, '`'); i >= 0 && strings.Count(linePrefix, "`")%2 == 1 {
+		if i := strings.IndexByte(rest[:lineEnd-restStart], '`'); i >= 0 && strings.Count(linePrefix, "`")%2 == 1 {
 			rest = rest[:i] // inside a backtick substitution: it ends at the closing backtick
 		}
 		args, offs, capped := pyArgs(rest)
@@ -172,7 +205,8 @@ func pyScan(text string) (out []PyInstall, spans [][2]int, skipped []int) {
 		if i := strings.LastIndexAny(prefix, ";&|`"); i >= 0 {
 			prefix = prefix[i:] // both regexps read the last command only: a long line stays linear
 		}
-		if !pyStartRe.MatchString(prefix) && !pyInterpRe.MatchString(prefix) {
+		param := strings.HasSuffix(linePrefix, "$") || strings.HasSuffix(linePrefix, "${") // $PIP, ${PY:=python}: a variable name
+		if param || !pyStartRe.MatchString(prefix) && !pyInterpRe.MatchString(prefix) {
 			inside = end
 			spans = append(spans, [2]int{cmdStart, end})
 			out = append(out, PyInstall{Cmd: cmd, Tool: tool + " (unrecognised position)", Opaque: true})
@@ -186,11 +220,64 @@ func pyScan(text string) (out []PyInstall, spans [][2]int, skipped []int) {
 		spans = append(spans, [2]int{cmdStart, inside})
 		if in, ok := classify(tool, args); ok {
 			in.Cmd = cmd
-			in.Dynamic = in.Dynamic || capped || slices.Contains(lead, "xargs") // xargs: packages come from stdin
+			in.Dynamic = in.Dynamic || capped || slices.Contains(strings.Fields(head), "xargs") // xargs: packages come from stdin
+			in.Named = in.Named && !in.Dynamic
 			out = append(out, in)
 		}
 	}
 	return out, spans, skipped
+}
+
+// pyMaxLine is the longest line pyScan reads; a longer one holding a tool word makes the script Opaque.
+const pyMaxLine = 8 << 10
+
+// pyHead returns where the command that ends prefix begins: after the last separator or unclosed
+// (, $( or backtick. A closed substitution is part of the command's own head (X=$(cat f) pip …).
+// sub is the start of the unclosed $( or backtick that holds the command, or -1.
+func pyHead(prefix string) (cut, sub int) {
+	type frame struct{ cut, sub int }
+	var stack []frame
+	var tick *frame
+	sub = -1
+	for i := 0; i < len(prefix); i++ {
+		switch prefix[i] {
+		case ';', '&', '|', '{':
+			cut = i + 1
+		case '(':
+			stack = append(stack, frame{cut, sub})
+			cut, sub = i+1, -1
+			if i > 0 && prefix[i-1] == '$' {
+				sub = i - 1
+			}
+		case ')':
+			if n := len(stack); n > 0 {
+				cut, sub, stack = stack[n-1].cut, stack[n-1].sub, stack[:n-1]
+			}
+		case '`':
+			if tick != nil {
+				cut, sub, tick = tick.cut, tick.sub, nil
+			} else {
+				tick = &frame{cut, sub}
+				cut, sub = i+1, i
+			}
+		}
+	}
+	return cut, sub
+}
+
+// pyLead returns the first two words of seg after if/then/do/… keywords ("" when missing) and
+// where the first one starts.
+func pyLead(seg string) (lead [2]string, at int) {
+	f := strings.Fields(seg)
+	for len(f) > 0 && pyLeadWord[f[0]] {
+		at = strings.Index(seg[at:], f[0]) + at + len(f[0])
+		f = f[1:]
+	}
+	if len(f) > 0 {
+		at = strings.Index(seg[at:], f[0]) + at
+	}
+	copy(lead[:], f)
+	return lead, at
 }
 
 // pyCmdStart returns where the command word holding the tool word at wordStart begins: its path
@@ -318,6 +405,11 @@ func classify(tool string, args []string) (PyInstall, bool) {
 		case s == "install":
 			in := PyInstall{Tool: "pip install"}
 			in.Pkgs, in.Dynamic = pyPkgs(pos[1:])
+			in.Named = len(in.Pkgs) == len(pos[1:]) && !slices.ContainsFunc(args, func(a string) bool {
+				// -r, -e, a short-flag cluster holding them, --upgrade-strategy (eager upgrades print more)
+				return strings.HasPrefix(a, "--requirement") || strings.HasPrefix(a, "--editable") || strings.HasPrefix(a, "--upgrade-strategy") ||
+					strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") && strings.ContainsAny(a, "re")
+			})
 			return in, true
 		default: // wheel, download and anything unknown may build an sdist
 			return PyInstall{Tool: "pip " + s, Opaque: true}, true
@@ -501,10 +593,10 @@ func classifyModule(mod string, args []string) (PyInstall, bool) {
 func pyPkgs(args []string) (pkgs []string, dynamic bool) {
 	for _, a := range args {
 		switch {
-		case strings.ContainsAny(a, "$`"):
-			dynamic = true
 		case strings.ContainsAny(a, "/\\") || strings.HasPrefix(a, ".") || strings.Contains(a, "://") ||
 			strings.HasSuffix(a, ".whl") || strings.HasSuffix(a, ".tar.gz") || strings.HasSuffix(a, ".zip"):
+		case strings.ContainsAny(a, "$`"):
+			dynamic = true
 		default:
 			if m := pep508Re.FindStringSubmatch(a); m != nil && pep.ValidName(m[1]) {
 				pkgs = append(pkgs, pep.Name(m[1]))
@@ -562,3 +654,6 @@ func (j *Job) PyActionsOK() bool {
 		return !baseAction(u) && name != "actions/setup-python" && name != "astral-sh/setup-uv"
 	})
 }
+
+// AlwaysInstalls reports whether an opaque tool (tox, uvx, pdm run, …) installs packages whenever it runs.
+func AlwaysInstalls(tool string) bool { return alwaysOpaque[strings.TrimSuffix(tool, " run")] }
