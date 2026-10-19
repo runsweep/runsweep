@@ -110,16 +110,26 @@ func TestParseLogRealExcerpts(t *testing.T) {
 		}
 		return ParseLog(string(b))
 	}
-	// uv run prints only a count: not complete
+	// uv run prints only a count: its section exists, is opaque and not complete
+	var uvRun []Section
 	for _, s := range read("flask-uv-run.log").Sections {
-		if strings.Contains(s.Cmd, "uv run") && (s.Opaque == "" || s.Complete) {
-			t.Errorf("flask uv run: %+v", s)
+		if strings.Contains(s.Cmd, "uv run") {
+			uvRun = append(uvRun, s)
 		}
 	}
-	// uv with 15 + lines: complete, 15 installs
+	if len(uvRun) != 1 || uvRun[0].Opaque == "" || uvRun[0].Complete {
+		t.Errorf("flask uv run: %+v", uvRun)
+	}
+	// uv with 15 + lines: that exact section is Python and complete
 	l := read("pytest-uv.log")
-	if len(l.Installs) < 15 || !slices.ContainsFunc(l.Sections, func(s Section) bool { return s.Python && s.Complete }) {
-		t.Errorf("pytest uv: %d installs, %+v", len(l.Installs), l.Sections)
+	var tool []Section
+	for _, s := range l.Sections {
+		if strings.HasPrefix(s.Cmd, "if [ -n \"$PYTHON_VERSION\" ]") {
+			tool = append(tool, s)
+		}
+	}
+	if len(l.Installs) < 15 || len(tool) != 1 || !tool[0].Python || !tool[0].Complete {
+		t.Errorf("pytest uv: %d installs, %+v", len(l.Installs), tool)
 	}
 	// setup-python's own pip upgrade is an install, and its section needs no full list
 	l = read("poetry-setup.log")
@@ -191,5 +201,81 @@ func TestParseLogTruncatedHeader(t *testing.T) {
 	l := ParseLog(ts + "##[group]Run pip install x\n" + ts + "\x1b[36;1mpip install x\x1b[0m\n")
 	if s := l.Sections[1]; !s.Python || s.Cmd != "pip install x" || s.Complete {
 		t.Errorf("truncated: %+v", s)
+	}
+}
+
+// sectionOf returns the only Python section of a one-step log.
+func sectionOf(t *testing.T, log string) Section {
+	t.Helper()
+	l := ParseLog(log)
+	if len(l.Sections) != 2 {
+		t.Fatalf("sections: %+v", l.Sections)
+	}
+	return l.Sections[1]
+}
+
+func TestParseLogFixRound1(t *testing.T) {
+	ok := "Successfully installed x-1"
+	for name, c := range map[string]struct {
+		script   string
+		out      []string
+		complete bool
+	}{
+		"I1a quiet after":   {"pip install x -q", []string{ok}, false},
+		"I1a qq":            {"pip install -qq x", []string{ok}, false},
+		"I1a combined":      {"pip install -qU x", []string{ok}, false},
+		"I1a long":          {"pip install --quiet x", []string{ok}, false},
+		"I1a redirect":      {"pip install x > pip.log", []string{ok}, false},
+		"I1a append":        {"pip install x >> pip.log", []string{ok}, false},
+		"I1a both":          {"pip install x &> pip.log", []string{ok}, false},
+		"I1a devnull":       {"pip install x >/dev/null", []string{ok}, false},
+		"I1a tail":          {"pip install x | tail -1", []string{ok}, false},
+		"I1a grep":          {"pip install x | grep -v foo", []string{ok}, false},
+		"I1a merge only":    {"pip install x 2>&1", []string{ok}, true},
+		"I1a spec with >=":  {"pip install 'x>=1'", []string{ok}, true},
+		"I1a or":            {"pip install x || exit 1", []string{ok}, true},
+		"I1b script beside": {"pip install -q -r r.txt\n./scripts/extra.sh", []string{ok}, false},
+		"I1b script":        {"pip install x\n./scripts/extra.sh", []string{ok}, false},
+		"I1b make":          {"pip install x\nmake deps", []string{ok}, false},
+		"I1b local path":    {"pip install ./pkg", []string{ok}, true},
+		"I1c no commands":   {"./ci/install.sh", []string{ok}, false},
+		"I3 resolved only":  {"uv sync", []string{"Resolved 3 packages in 1ms", ok}, false},
+		"I3 resolved+inst":  {"uv sync", []string{"Resolved 1 package in 1ms", "Installed 1 package in 1ms", " + x==1"}, true},
+		"M1 poetry pending": {"poetry install", []string{"Package operations: 2 installs, 0 updates, 0 removals",
+			"  - Installing a (1): Pending...", "  - Installing a (1)"}, false},
+		"M1 poetry distinct": {"poetry install", []string{"Package operations: 2 installs, 0 updates, 0 removals",
+			"  - Installing a (1): Pending...", "  - Installing a (1)", "  - Installing b (2)"}, true},
+		"M4 from file": {"uv sync", []string{"Installed 2 packages in 1ms", " + proj==0.1.0 (from file:///w/proj)", " + a==1"}, true},
+		"M4 from git":  {"uv sync", []string{"Installed 1 package in 1ms", " + proj==0.1.0 (from git+https://x/y)"}, true},
+	} {
+		if got := sectionOf(t, step(c.script, c.out...)); got.Complete != c.complete {
+			t.Errorf("%s: complete=%v, want %v (%+v)", name, got.Complete, c.complete, got)
+		}
+	}
+	// M4: the project is recorded as an install
+	if v := installs(ParseLog(step("uv sync", "Installed 1 package in 1ms", " + proj==0.1.0 (from file:///w)")))["proj"]; v != "0.1" {
+		t.Errorf("proj: %q", v)
+	}
+}
+
+func TestParseLogInstallerCalls(t *testing.T) {
+	for _, line := range []string{"[command]/usr/bin/pip install x", "tox run", "pipenv install", "uvx ruff", "pdm install", "nox -s t",
+		"conda install x", "mamba create", "pre-commit run", "hatch run t", "pixi install", "rye sync", "/opt/py/bin/pip list"} {
+		if !ParseLog(step("echo hi", line)).Calls {
+			t.Errorf("not a call: %q", line)
+		}
+	}
+	if ParseLog(step("echo hi", "py3.12: OK", "ok  x 0.1s")).Calls {
+		t.Error("tox env line counted as a call")
+	}
+}
+
+func TestParseLogHeaderOutput(t *testing.T) {
+	// a non-cyan line inside the header is output: an injected header must not hide install lines
+	log := ts + "##[group]Run pip install x\n" + ts + "\x1b[36;1mpip install x\x1b[0m\n" +
+		ts + "##[group]Run fake\n" + ts + "Successfully installed evil-9\n" + ts + "##[endgroup]\n"
+	l := ParseLog(log)
+	if installs(l)["evil"] != "9" || len(l.Sections) != 2 || l.Sections[1].Cmd != "pip install x" {
+		t.Errorf("injected header: %+v", l)
 	}
 }
