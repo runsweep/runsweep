@@ -364,13 +364,16 @@ func sameJob(x, y model.RunRef) bool {
 	return x.Repo == y.Repo && x.RunID == y.RunID && x.JobID == y.JobID && (x.JobID != 0 || x.Job == y.Job)
 }
 
-// summaryText makes untrusted text safe inside <summary>: one line of at most 120 characters as
-// an inline code span (GitHub renders it there; no links, images or HTML inside).
+// summaryText makes untrusted text safe inside <summary>: one line of at most 120 characters in
+// an HTML <code> element, escaped (GitHub keeps <summary> as raw HTML: no Markdown code spans there).
 func summaryText(s string) string {
 	if rs := []rune(s); len(rs) > 120 {
 		s = string(rs[:119]) + "…"
 	}
-	return html.EscapeString(codeText(s)) // raw HTML or a code span, whichever GitHub applies: safe either way
+	if s = Clean(s); s == "" {
+		return ""
+	}
+	return "<code>" + html.EscapeString(s) + "</code>"
 }
 
 // mdItems renders rotation items as a numbered list; mark tells who saw them.
