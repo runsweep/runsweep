@@ -352,7 +352,7 @@ func TestIncompleteKeepsFindings(t *testing.T) {
 		s := b.String()
 		head, title := "Scan incomplete: o/b: HTTP 401\n", unverifiedTitle
 		if name == "md" {
-			head, title = "> **Scan incomplete: o/b: HTTP 401.**", "### Not verified"
+			head, title = "> **Scan incomplete: `o/b: HTTP 401`.**", "### Not verified"
 		}
 		if !strings.Contains(s, head) || name == "text" && !strings.HasPrefix(s, head) || !strings.Contains(s, title) ||
 			!strings.Contains(s, "DEPLOY_KEY") || !strings.Contains(s, "axios@1.14.1 in package-lock.json") || strings.Contains(s, "Nothing") {
@@ -428,7 +428,7 @@ func TestMarkdownVerdicts(t *testing.T) {
 			"| 0 | 0 | 0 | 5 |", "### Rotate first\n\nNothing. No job is affected, possible or unchecked.\n", "#### ✅ Clean · 5"}, []string{"#### 🛑", "### Not verified"}},
 		{"not cleared", notCleared, []string{"> [!WARNING]\n> **Not cleared: 1 of 5 jobs could not be verified.**  \n> No job is proven to have run it. Treat the secrets under *Not verified*",
 			"| 0 | 0 | **1** | 4 |", "<details>\n<summary>1 job · jobs unavailable: deleted by GitHub retention (HTTP 410)</summary>"}, []string{"No exposure"}},
-		{"incomplete", incomplete, []string{"> [!WARNING]\n> **Scan incomplete: o/b: HTTP 401[2J.**  \n> The report covers only what was checked; an empty section proves nothing.\n"}, []string{"\x1b", "[!NOTE]"}},
+		{"incomplete", incomplete, []string{"> [!WARNING]\n> **Scan incomplete: `o/b: HTTP 401[2J`.**  \n> The report covers only what was checked; an empty section proves nothing.\n"}, []string{"\x1b", "[!NOTE]"}},
 		{"possible", possible, []string{"> [!CAUTION]\n> **Possibly exposed: 1 job may have run a compromised package or action.**  \n> Review the secrets under *Also review* now.\n"}, nil},
 		{"skipped", skipped, []string{"**Not cleared: 1 repository was skipped.**"}, []string{"[!NOTE]"}},
 		{"retention", retention, []string{"**Not cleared: runs older than 90 days may be gone.**"}, []string{"[!NOTE]"}},
