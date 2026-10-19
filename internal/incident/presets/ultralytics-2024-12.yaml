@@ -1,0 +1,16 @@
+id: ultralytics-2024-12
+title: "ultralytics 8.3.41 / 8.3.42 / 8.3.45 / 8.3.46 on PyPI (GitHub Actions injection, cryptominer)"
+# Only the four malicious versions are listed. OSV PYSEC-2024-154 gives a range that also
+# covers 8.3.43 and 8.3.44; those are clean and still on PyPI (see the zizmor write-up
+# and https://blog.pypi.org/posts/2024-12-11-ultralytics-attack-analysis/).
+# Times from https://blog.yossarian.net/2024/12/06/zizmor-ultralytics-injection (UTC inferred):
+# 8.3.41 up 2024-12-04 20:51, down 12-05 09:15; 8.3.42 up 12-05 12:47, down 13:47;
+# 8.3.45 up 12-07 01:41, down 10:08; 8.3.46 up 12-07 02:27, down 10:09.
+# start rounded down and end rounded up to whole days.
+window: {start: 2024-12-04T00:00:00Z, end: 2024-12-07T23:59:59Z}
+pypi:
+  - {name: ultralytics, versions: ["8.3.41", "8.3.42", "8.3.45", "8.3.46"]}
+refs:
+  - https://osv.dev/vulnerability/PYSEC-2024-154
+  - https://blog.yossarian.net/2024/12/06/zizmor-ultralytics-injection
+  - https://blog.pypi.org/posts/2024-12-11-ultralytics-attack-analysis/

@@ -1,0 +1,16 @@
+id: mrmustard-2026-07
+title: "mrmustard 0.7.4 on PyPI (credential stealer)"
+# start: published ~2026-07-23 22:00 UTC, approximate (https://safedep.io/mrmustard-malicious-pypi-package);
+# rounded down to the day.
+# end: NO removal time is published. The release was last reported available on 2026-07-24
+# (https://github.com/XanaduAI/MrMustard/issues/656, opened 11:46Z;
+# https://www.stepsecurity.io/blog/compromised-pypi-mrmustard-0-7-4-credential-stealer),
+# so end = last report day + 1 = end of 2026-07-25.
+window: {start: 2026-07-23T00:00:00Z, end: 2026-07-25T23:59:59Z}
+pypi:
+  - {name: mrmustard, versions: ["0.7.4"]}
+refs:
+  - https://osv.dev/vulnerability/MAL-2026-11049
+  - https://github.com/XanaduAI/MrMustard/issues/656
+  - https://www.stepsecurity.io/blog/compromised-pypi-mrmustard-0-7-4-credential-stealer
+  - https://safedep.io/mrmustard-malicious-pypi-package
