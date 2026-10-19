@@ -308,3 +308,42 @@ func TestParseLogNoInstallCommands(t *testing.T) {
 		}
 	}
 }
+
+func TestParseLogQuietEnvAndScope(t *testing.T) {
+	ok := "Successfully installed x-1"
+	withEnv := func(script, env string, out ...string) string {
+		return strings.Replace(step(script, out...), ts+"shell:", ts+"env:\n"+ts+"  "+env+"\n"+ts+"shell:", 1)
+	}
+	for name, c := range map[string]struct {
+		log      string
+		complete bool
+	}{
+		"header UV_QUIET=1":     {withEnv("uv run pytest", "UV_QUIET: 1"), false},
+		"header UV_QUIET=0":     {withEnv("uv run pytest", "UV_QUIET: 0"), true},
+		"header PIP_QUIET=1":    {withEnv("pip install x", "PIP_QUIET: 1", ok), false},
+		"header PIP_PROGRESS":   {withEnv("pip install x", "PIP_PROGRESS_BAR: off", ok), true},
+		"header UV_NO_PROGRES":  {withEnv("uv run pytest", "UV_NO_PROGRESS: 1"), true},
+		"script UV_QUIET=1":     {step("UV_QUIET=1 uv run pytest"), false},
+		"script export":         {step("export PIP_QUIET=2\npip install x", ok), false},
+		"script UV_QUIET=false": {step("UV_QUIET=false uv run pytest"), true},
+		"later pytest -q":       {step("pip install x && pytest -q", ok), true},
+		"later redirect":        {step("pip install x && pytest > out.txt", ok), true},
+		"quoted gt":             {step(`pip install "numpy>1.20"`, "Successfully installed numpy-1.26.4"), true},
+		"quoted single gt":      {step(`pip install 'numpy>1.20'`, "Successfully installed numpy-1.26.4"), true},
+		"filter after":          {step("pip install x | tail -1", ok), false},
+		"quiet own args":        {step("pip install -q x && pytest", ok), false},
+		"redirect own":          {step("pip install x > log.txt && pytest", ok), false},
+		"2>&1 then tail":        {step("pip install x 2>&1 | tail -3", ok), false},
+	} {
+		l := ParseLog(c.log)
+		var py []Section
+		for _, s := range l.Sections {
+			if s.Python {
+				py = append(py, s)
+			}
+		}
+		if len(py) != 1 || py[0].Complete != c.complete {
+			t.Errorf("%s: want complete=%v: %+v", name, c.complete, l.Sections)
+		}
+	}
+}

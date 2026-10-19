@@ -4,7 +4,6 @@ package pypi
 
 import (
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -54,9 +53,7 @@ var (
 	partialRe = regexp.MustCompile(`^\s*(?:Audited \d+ packages?|No dependencies to install or update|Installing build dependencies|Building \S+ @ )`)
 	loopRe    = regexp.MustCompile(`\b(?:for|while|xargs)\b`)
 	// a quiet flag (-q, -qq, -qU, --quiet) on a command line
-	quietRe = regexp.MustCompile(`(?:^|\s)(?:-[a-zA-Z]*q[a-zA-Z]*|--quiet)(?:\s|$)`)
-	// output redirected to a file or cut by a filter
-	redirRe   = regexp.MustCompile(`&>|>(?:[^=]|$)|[^|]\|\s*(?:tail|head|grep|sed|awk|cut|wc|xargs)\b`)
+	quietRe   = regexp.MustCompile(`(?:^|\s)(?:-[a-zA-Z]*q[a-zA-Z]*|--quiet)(?:\s|$)`)
 	fdMergeRe = regexp.MustCompile(`\d>&\d`)
 )
 
@@ -78,6 +75,7 @@ type section struct {
 	uvNames  map[string]bool // distinct packages listed since then
 	uvSeen   bool            // an "Installed N" or "Audited" block was printed
 	resolved bool            // "Resolved N packages" was printed
+	envQuiet bool            // UV_QUIET or PIP_QUIET set in the step's environment
 	sawOut   bool            // the output showed any install, listing or partial line
 	poWant   int
 	poOpen   bool
@@ -147,6 +145,9 @@ func (s *section) finish() Section {
 		out.Complete = out.Opaque == ""
 		return out
 	}
+	if s.envQuiet || envQuiet(out.Cmd) {
+		return out // quiet by environment: versions may go unprinted
+	}
 	if cmds == 0 {
 		// no install command: complete only if nothing in the output looks like an install
 		out.Complete = out.Opaque == "" && !s.sawOut && !s.partial
@@ -159,13 +160,38 @@ func (s *section) finish() Section {
 	return out
 }
 
-// quietOutput reports whether an install command line asks for quiet output or hides it.
+var (
+	quotedRe   = regexp.MustCompile(`"[^"]*"|'[^']*'`)
+	afterCmdRe = regexp.MustCompile(`^\s*(?:&>|\|\s*(?:tail|head|grep|sed|awk|cut|wc|xargs)\b)`)
+	envQuietRe = regexp.MustCompile(`(?:^|[\s;&|(])(?:UV|PIP)_QUIET(?:=|:\s*)["']?([^\s"';&|]*)`)
+)
+
+// envQuiet reports whether text sets UV_QUIET or PIP_QUIET to something other than off.
+func envQuiet(text string) bool {
+	for _, m := range envQuietRe.FindAllStringSubmatch(text, -1) {
+		if v := strings.ToLower(m[1]); v != "" && v != "0" && v != "false" {
+			return true
+		}
+	}
+	return false
+}
+
+// quietOutput reports whether an install command asks for quiet output (a flag among its own
+// arguments) or hides it (a redirect in its arguments or a filter right after it).
 func quietOutput(script string) bool {
-	for _, l := range strings.Split(strings.ReplaceAll(script, "\\\n", " "), "\n") {
-		if !workflow.HasPyTool(l) || !slices.ContainsFunc(workflow.PyInstalls(l), func(in workflow.PyInstall) bool { return !in.Opaque }) {
+	script = fdMergeRe.ReplaceAllString(strings.ReplaceAll(script, "\\\n", " "), "")
+	pos := 0
+	for _, in := range workflow.PyInstalls(script) {
+		if in.Opaque {
 			continue
 		}
-		if quietRe.MatchString(l) || redirRe.MatchString(fdMergeRe.ReplaceAllString(l, "")) {
+		i := strings.Index(script[pos:], in.Cmd)
+		if i < 0 {
+			return true // cannot locate the command: assume the worst
+		}
+		pos += i + len(in.Cmd)
+		cmd := quotedRe.ReplaceAllString(in.Cmd, "")
+		if quietRe.MatchString(cmd) || strings.Contains(cmd, ">") || afterCmdRe.MatchString(script[pos:]) {
 			return true
 		}
 	}
@@ -241,6 +267,9 @@ func ParseLog(log string) Log {
 			if strings.Contains(raw, "\x1b[36;1m") {
 				cur.echoText = append(cur.echoText, sgrRe.ReplaceAllString(tsRe.ReplaceAllString(raw, ""), ""))
 				continue
+			}
+			if m := envQuietRe.FindStringSubmatch(sgrRe.ReplaceAllString(tsRe.ReplaceAllString(raw, ""), "")); m != nil && envQuiet(m[0]) {
+				cur.envQuiet = true
 			}
 		}
 		if !containsAny(raw, lineLiterals) {
