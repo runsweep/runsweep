@@ -74,7 +74,7 @@ func (c *Cache) Match(ctx context.Context, f Fetcher, repo, sha string, bad Bad)
 				source.Parse(func() {
 					switch kind {
 					case "requirements":
-						p.pkgs = ParseRequirements(b)
+						p.pkgs, p.err = ParseRequirements(b)
 					case "toml":
 						p.pkgs, p.err = ParseTOMLLock(e.Path, b)
 					case "pipfile":
@@ -86,9 +86,8 @@ func (c *Cache) Match(ctx context.Context, f Fetcher, repo, sha string, bad Bad)
 			v = p
 		}
 		p := v.(parsed)
-		if p.err != nil {
+		if p.err != nil { // the pins read before the error still count
 			r.Failed = append(r.Failed, e.Path)
-			continue
 		}
 		for _, pkg := range p.pkgs {
 			if bad.Is(pkg.Name, pkg.Version) {

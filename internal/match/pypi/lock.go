@@ -1,7 +1,9 @@
 package pypi
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"regexp"
@@ -72,34 +74,45 @@ func (b Bad) Mentions(token string) bool {
 	return false
 }
 
-var reqRe = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[[^\]]*\])?\s*===?\s*([^\s;,#]+)\s*(?:;.*)?$`)
+var (
+	reqRe   = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[[^\]]*\])?\s*===?\s*([^\s;,#]+)\s*(?:,[^;]*)?(?:;.*)?$`)
+	nameRe  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*`)
+	trailRe = regexp.MustCompile(`\s(?:#|-).*$`) // a comment or --hash option after whitespace
+)
 
 // ParseRequirements returns the exact pins (== or ===) of a requirements or constraints file.
-// Ranges, bare names, options and URLs are not pins.
-func ParseRequirements(b []byte) []Pkg {
-	text := strings.NewReplacer("\\\r\n", " ", "\\\n", " ").Replace(string(b))
+// Ranges, bare names, options and URLs are not pins. A NUL byte (UTF-16 text) or a line that
+// names a package with == but gives no readable version is an error; the pins read before it are
+// still returned.
+func ParseRequirements(b []byte) ([]Pkg, error) {
+	if bytes.IndexByte(b, 0) >= 0 {
+		return nil, errors.New("not UTF-8 text")
+	}
+	text := strings.NewReplacer("\\\r\n", " ", "\\\n", " ").Replace(string(bytes.TrimPrefix(b, []byte("\xef\xbb\xbf"))))
 	var out []Pkg
+	var bad error
 	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
-		if i := strings.Index(line, " #"); i >= 0 {
-			line = line[:i]
-		}
-		if i := strings.Index(line, " -"); i >= 0 { // trailing --hash=… options
-			line = line[:i]
-		}
 		line = strings.TrimSpace(line)
+		line = strings.TrimSpace(trailRe.ReplaceAllString(line, ""))
 		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "-") {
 			continue
 		}
 		m := reqRe.FindStringSubmatch(line)
 		if m == nil {
+			if n := nameRe.FindString(line); n != "" && pep.ValidName(n) && strings.Contains(line, "==") &&
+				!strings.HasPrefix(strings.TrimSpace(line[len(n):]), "@") {
+				bad = fmt.Errorf("requirement %q unreadable", line)
+			}
 			continue
 		}
-		if v, ok := pep.ParseVersion(m[2]); ok && pep.ValidName(m[1]) {
-			out = append(out, Pkg{pep.Name(m[1]), versionText(v)})
+		v, ok := pep.ParseVersion(m[2])
+		if !ok || !pep.ValidName(m[1]) {
+			bad = fmt.Errorf("requirement %q version unreadable", line)
+			continue
 		}
+		out = append(out, Pkg{pep.Name(m[1]), versionText(v)})
 	}
-	return sortPkgs(out)
+	return sortPkgs(out), bad
 }
 
 // ParseTOMLLock reads uv.lock and poetry.lock ([[package]]) or pylock*.toml ([[packages]]).
@@ -116,17 +129,19 @@ func ParseTOMLLock(p string, b []byte) ([]Pkg, error) {
 		list = doc.Packages
 	}
 	var out []Pkg
+	var bad error
 	for _, e := range list {
 		if e.Version == "" { // a source tree or VCS entry
 			continue
 		}
 		v, ok := pep.ParseVersion(e.Version)
 		if !ok || !pep.ValidName(e.Name) {
-			return nil, fmt.Errorf("package %q version %q unreadable", e.Name, e.Version)
+			bad = fmt.Errorf("package %q version %q unreadable", e.Name, e.Version)
+			continue
 		}
 		out = append(out, Pkg{pep.Name(e.Name), versionText(v)})
 	}
-	return sortPkgs(out), nil
+	return sortPkgs(out), bad
 }
 
 // ParsePipfileLock reads the default and develop sections of Pipfile.lock.
@@ -136,6 +151,7 @@ func ParsePipfileLock(b []byte) ([]Pkg, error) {
 		return nil, err
 	}
 	var out []Pkg
+	var bad error
 	for _, sec := range []string{"default", "develop"} {
 		var pkgs map[string]struct {
 			Version string `json:"version"`
@@ -151,12 +167,13 @@ func ParsePipfileLock(b []byte) ([]Pkg, error) {
 			}
 			v, ok := pep.ParseVersion(strings.TrimPrefix(p.Version, "=="))
 			if !ok || !pep.ValidName(name) {
-				return nil, fmt.Errorf("package %q version %q unreadable", name, p.Version)
+				bad = fmt.Errorf("package %q version %q unreadable", name, p.Version)
+				continue
 			}
 			out = append(out, Pkg{pep.Name(name), versionText(v)})
 		}
 	}
-	return sortPkgs(out), nil
+	return sortPkgs(out), bad
 }
 
 func sortPkgs(p []Pkg) []Pkg {

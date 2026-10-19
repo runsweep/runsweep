@@ -1,12 +1,17 @@
 package pypi
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/runsweep/runsweep/internal/pep"
+)
 
 func FuzzParseRequirements(f *testing.F) {
 	f.Add([]byte("a==1 \\\n  --hash=sha256:x\nb[c]===2 ; x\n-r y.txt\n"))
 	f.Fuzz(func(t *testing.T, b []byte) {
-		for _, p := range ParseRequirements(b) {
-			if p.Name == "" || p.Version == "" {
+		got, _ := ParseRequirements(b)
+		for _, p := range got {
+			if p.Name == "" || p.Version == "" || pep.Name(p.Name) != p.Name {
 				t.Fatalf("%+v", p)
 			}
 		}

@@ -17,10 +17,37 @@ func readFix(t *testing.T, n string) []byte {
 }
 
 func TestParseRequirements(t *testing.T) {
-	got := ParseRequirements(readFix(t, "requirements.txt"))
+	got, err := ParseRequirements(readFix(t, "requirements.txt"))
 	want := []Pkg{{"flask-sqlalchemy", "3.1.1"}, {"litellm", "1.82.8"}, {"numpy", "2"}}
-	if !slices.Equal(got, want) {
-		t.Errorf("got %+v", got)
+	if err != nil || !slices.Equal(got, want) {
+		t.Errorf("got %+v %v", got, err)
+	}
+}
+
+func TestParseRequirementsForms(t *testing.T) {
+	lit := []Pkg{{"litellm", "1.82.8"}}
+	for name, c := range map[string]struct {
+		in   string
+		want []Pkg
+		err  bool
+	}{
+		"bom":         {"\xef\xbb\xbflitellm==1.82.8\n", lit, false},
+		"crlf":        {"# c\r\nlitellm==1.82.8\r\nrequests>=2\r\n", lit, false},
+		"spaces":      {"litellm == 1.82.8\n", lit, false},
+		"marker":      {"litellm==1.82.8;python_version>'3'\n", lit, false},
+		"specifiers":  {"litellm==1.82.8,<2\n", lit, false},
+		"tab comment": {"litellm==1.82.8\t# c\n", lit, false},
+		"tab hash":    {"litellm==1.82.8\t--hash=sha256:aa\n", lit, false},
+		"url":         {"pkg @ https://x/a==b.whl\n", nil, false},
+		"garbage":     {"litellm==garbage\n", nil, true},
+		"wildcard":    {"litellm==1.82.*\n", nil, true},
+		"nul":         {"l\x00i\x00t\x00", nil, true},
+		"pin and bad": {"litellm==1.82.8\nother==zz\n", lit, true},
+	} {
+		got, err := ParseRequirements([]byte(c.in))
+		if (err != nil) != c.err || !slices.Equal(got, c.want) {
+			t.Errorf("%s: %+v %v", name, got, err)
+		}
 	}
 }
 
@@ -38,6 +65,14 @@ func TestParseLocks(t *testing.T) {
 	got, err := ParsePipfileLock(readFix(t, "Pipfile.lock"))
 	if err != nil || !slices.Equal(got, []Pkg{{"litellm", "1.82.8"}, {"pytest", "8"}}) {
 		t.Errorf("Pipfile.lock: %+v %v", got, err)
+	}
+	got, err = ParsePipfileLock([]byte(`{"default":{"litellm":{"version":"==1.82.8","markers":"python_version>='3'","index":"pypi"},"bad":{"version":"==zz"}}}`))
+	if err == nil || !slices.Equal(got, []Pkg{{"litellm", "1.82.8"}}) {
+		t.Errorf("Pipfile.lock partial: %+v %v", got, err)
+	}
+	got, err = ParseTOMLLock("uv.lock", []byte("[[package]]\nname = \"litellm\"\nversion = \"1.82.8\"\n[[package]]\nname = \"x\"\nversion = \"zz\"\n"))
+	if err == nil || !slices.Equal(got, []Pkg{{"litellm", "1.82.8"}}) {
+		t.Errorf("uv.lock partial: %+v %v", got, err)
 	}
 	for file, b := range map[string]string{"uv.lock": "[[package]\n", "Pipfile.lock": "{"} {
 		var err error
