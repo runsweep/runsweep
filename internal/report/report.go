@@ -152,29 +152,20 @@ func mdVerdict(r *model.Result) string {
 	a, p, u := r.Count(model.Affected), r.Count(model.Possible), r.Count(model.Unchecked)
 	var kind, head, todo string
 	switch {
-	case r.Incomplete:
-		kind, head = "WARNING", "Scan incomplete: "+code(r.Error)+"."
-		todo = "The report covers only what was checked; an empty section proves nothing."
 	case a > 0:
 		kind, head = "CAUTION", fmt.Sprintf("Exposed: %s ran a compromised package or action.", count(a, "job"))
-		k := 0
-		for _, it := range r.Rotation {
-			if it.Confirmed {
-				k++
-			}
-		}
-		todo = "Review the secrets under *Also review* and *Not verified*."
-		if k > 0 {
-			todo = fmt.Sprintf("Rotate the %s under *Rotate first* now.", count(k, "secret"))
-		}
+		todo = actionLine(r, "AFFECTED", false)
 	case p > 0:
 		kind, head = "CAUTION", fmt.Sprintf("Possibly exposed: %s may have run a compromised package or action.", count(p, "job"))
-		todo = "Review the secrets under *Also review* now."
+		todo = actionLine(r, "POSSIBLE", true)
+	case r.Incomplete:
+		kind, head = "WARNING", "Scan incomplete: "+codeText(r.Error)+"."
+		todo = "The report covers only what was checked; an empty section proves nothing."
 	case u > 0 || len(r.Skipped) > 0 || r.RetentionWarning:
 		kind = "WARNING"
 		switch {
 		case u > 0:
-			head = fmt.Sprintf("Not cleared: %d of %s could not be verified.", u, count(r.JobsScanned, "job"))
+			head = fmt.Sprintf("Not cleared: %d of %s could not be verified.", u, count(max(r.JobsScanned, a+p+u), "job"))
 		case len(r.Skipped) > 0:
 			head = fmt.Sprintf("Not cleared: %d repositories were skipped.", len(r.Skipped))
 			if len(r.Skipped) == 1 {
@@ -183,12 +174,58 @@ func mdVerdict(r *model.Result) string {
 		default:
 			head = "Not cleared: runs older than 90 days may be gone."
 		}
-		todo = "No job is proven to have run it. Treat the secrets under *Not verified* as possibly exposed until you rotate them or recover the evidence."
+		todo = "No job is proven to have run it."
+		switch {
+		case len(r.Unverified) > 0:
+			todo += " Treat the secrets under *Not verified* as possibly exposed until you rotate them or recover the evidence."
+		case u > 0:
+			todo += " Review the UNCHECKED jobs under *Findings*."
+		default:
+			todo += " Runs that were skipped or deleted could not be checked."
+		}
+	case r.JobsScanned == 0:
+		kind, head = "WARNING", "No jobs found in the window."
+		todo = "Check the incident window and the repositories; nothing was verified."
 	default:
 		kind, head = "NOTE", fmt.Sprintf("No exposure found. All %s were checked.", count(r.JobsScanned, "job"))
 		todo = "Nothing to rotate for this incident."
 	}
+	if r.Incomplete && (a > 0 || p > 0) {
+		todo += "  \n> The scan stopped early (" + codeText(r.Error) + "); more jobs may be affected."
+	}
 	return fmt.Sprintf("> [!%s]\n> **%s**  \n> %s\n\n", kind, head, todo)
+}
+
+// actionLine names only the sections that are printed: Rotate first (confirmed items), Also review,
+// Not verified. status names the jobs to review when none of them is.
+func actionLine(r *model.Result, status string, now bool) string {
+	k := 0
+	for _, it := range r.Rotation {
+		if it.Confirmed {
+			k++
+		}
+	}
+	if k > 0 {
+		return fmt.Sprintf("Rotate the %s under *Rotate first* now.", count(k, "secret"))
+	}
+	var parts []string
+	if len(r.Rotation) > 0 {
+		parts = append(parts, "*Also review*")
+	}
+	if len(r.Unverified) > 0 {
+		parts = append(parts, "*Not verified*")
+	}
+	end := "."
+	if now {
+		end = " now."
+	}
+	switch {
+	case len(parts) > 0:
+		return "Review the secrets under " + strings.Join(parts, " and ") + end
+	case len(secretsUnknown(r)) > 0:
+		return "Secrets are unknown for some jobs; review them manually, see *Rotate first*."
+	}
+	return "Review the " + status + " jobs under *Findings*."
 }
 
 // mdCounts renders the status counters; non-zero risk counts are bold.
@@ -236,11 +273,14 @@ func mdFindings(b *strings.Builder, r *model.Result) {
 			"Rotate them, or recover the evidence and run runsweep again.\n\n")
 		b.WriteString("| Secret | Kind | Unchecked jobs | Why not verified |\n| --- | --- | :---: | --- |\n")
 		for _, it := range r.Unverified {
-			fmt.Fprintf(b, "| **%s** | %s | %d | %s |\n", code(it.Name), kind(it.Tier), len(it.Runs), cell(whyNot(r, it)))
+			fmt.Fprintf(b, "| **%s** | %s | %d | %s |\n", code(it.Name), kind(it.Tier), len(it.Runs), code(whyNot(r, it)))
 		}
 		b.WriteString("\n")
 	}
 
+	if len(r.Findings) == 0 && cleanJobs(r) == 0 {
+		return
+	}
 	b.WriteString("### Findings\n\n")
 	var by [4][]model.Finding
 	for _, f := range r.Findings {
@@ -272,9 +312,9 @@ func mdFindings(b *strings.Builder, r *model.Result) {
 		for _, k := range order {
 			reason := "no reason recorded"
 			if k != "" {
-				reason = k
+				reason = summaryText(k)
 			}
-			fmt.Fprintf(b, "<details>\n<summary>%s · %s</summary>\n\n%s\n</details>\n\n", count(len(groups[k]), "job"), summaryText(reason), mdTable(groups[k]))
+			fmt.Fprintf(b, "<details>\n<summary>%s · %s</summary>\n\n%s\n</details>\n\n", count(len(groups[k]), "job"), reason, mdTable(groups[k]))
 		}
 	}
 	if n := cleanJobs(r); n > 0 {
@@ -308,7 +348,7 @@ func whyNot(r *model.Result, it model.RotationItem) string {
 	for _, f := range r.Findings {
 		k := firstNote(f)
 		if f.Status != model.Unchecked || k == "" ||
-			!slices.ContainsFunc(it.Runs, func(x model.RunRef) bool { return x.Repo == f.Run.Repo && x.RunID == f.Run.RunID }) {
+			!slices.ContainsFunc(it.Runs, func(x model.RunRef) bool { return sameJob(x, f.Run) }) {
 			continue
 		}
 		n[k]++
@@ -319,17 +359,19 @@ func whyNot(r *model.Result, it model.RotationItem) string {
 	return best
 }
 
-// summaryText makes untrusted text safe inside <summary>: one table-safe line of at most
-// 120 characters with HTML and link/code-span characters escaped.
+// sameJob tells whether two refs name the same job of a run: by job ID, by name when neither has one.
+func sameJob(x, y model.RunRef) bool {
+	return x.Repo == y.Repo && x.RunID == y.RunID && x.JobID == y.JobID && (x.JobID != 0 || x.Job == y.Job)
+}
+
+// summaryText makes untrusted text safe inside <summary>: one line of at most 120 characters as
+// an inline code span (GitHub renders it there; no links, images or HTML inside).
 func summaryText(s string) string {
 	if rs := []rune(s); len(rs) > 120 {
 		s = string(rs[:119]) + "…"
 	}
-	return mdChars.Replace(html.EscapeString(cell(s)))
+	return html.EscapeString(codeText(s)) // raw HTML or a code span, whichever GitHub applies: safe either way
 }
-
-// mdChars turns the characters that start a link or a code span into entities.
-var mdChars = strings.NewReplacer("[", "&#91;", "]", "&#93;", "`", "&#96;")
 
 // mdItems renders rotation items as a numbered list; mark tells who saw them.
 func mdItems(b *strings.Builder, list []model.RotationItem, mark string) {
@@ -501,11 +543,14 @@ func Clean(s string) string {
 
 // code renders untrusted text as an inline code span, which GFM does not interpret
 // (no links, images, HTML, mentions or autolinks). Empty input gives an empty cell.
-func code(s string) string {
+func code(s string) string { return strings.ReplaceAll(codeText(s), "|", `\|`) }
+
+// codeText is code outside a table, where pipes need no escaping.
+func codeText(s string) string {
 	if s == "" {
 		return ""
 	}
-	return "`" + cell(strings.ReplaceAll(s, "`", "'")) + "`"
+	return "`" + Clean(strings.ReplaceAll(s, "`", "'")) + "`"
 }
 
 // normalize returns a copy with nil slices made empty and times in UTC; the input is not modified.
