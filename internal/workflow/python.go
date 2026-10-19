@@ -8,11 +8,33 @@ import (
 	"github.com/runsweep/runsweep/internal/pep"
 )
 
-// pyToolRe finds a Python tool word, a path before it allowed (.venv/bin/python, /usr/bin/pip3).
-var pyToolRe = regexp.MustCompile(`(?:^|[^\w./-])(?:[^\s;&|()'"` + "`" + `]*/)?(pip-sync|pip-compile|pre-commit|python[\d.]*|pip[\d.]*|pipx|pipenv|py|uvx|uv|poetry|pdm|hatch|tox|nox|conda|mamba|micromamba|pixi|rye|flit|maturin|cibuildwheel)(?:\.exe)?(?:$|[ \t;&|)\n])`)
+// pyToolRe finds a Python tool word, case-insensitively. Group 1 is what precedes the word in the
+// same command word: a quote and/or a path (.venv/bin/, "$VENV/bin/, "/my dir/); group 2 is the tool.
+var pyToolRe = regexp.MustCompile(`(?i)(?:^|[^\w./-])("[^"\n]*/|'[^'\n]*/|["']?(?:[^\s;&|()'"` + "`" + `]*/)?)(pip-sync|pip-compile|pre-commit|python[\d.]*|pypy[\d.]*|pip[\d.]*|pipx|pipenv|py|uvx|uv|poetry|pdm|hatch|tox|nox|conda|mamba|micromamba|pixi|rye|flit|maturin|cibuildwheel)(?:\.exe)?["']?(?:$|[ \t;&|)\n])`)
+
+const (
+	pyAssign = `[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|\S*)`
+	// wrappers that run the next word as a command
+	pyWrap = `(?:` + pyAssign + `\s+|!\s+` +
+		`|sudo\b(?:\s+(?:-[ugCDhpRrt]\s+\S+|-\S+|` + pyAssign + `))*\s+` +
+		`|timeout\b(?:\s+-\S+)*\s+[\d.]+[smhd]?\s+` +
+		`|nice\b(?:\s+(?:-n\s+-?\d+|-\S+))*\s+` +
+		`|(?:env|time|exec|nohup|command|xargs)\b(?:\s+(?:-\S+|` + pyAssign + `))*\s+` +
+		`|(?:ba|z|da)?sh\s+(?:-\S+\s+)*-\w*c\s+)*`
+)
 
 // pyStartRe: what may precede a command word on its line.
-var pyStartRe = regexp.MustCompile(`(?:^|[;&|({]|\$\(|\b(?:then|do|else)\b)\s*(?:(?:sudo|env|time|exec|nohup|xargs)\b(?:\s+(?:-\S+|[A-Za-z_]\w*=\S*))*\s+)*$`)
+var pyStartRe = regexp.MustCompile(`(?:^|[;&|({]|\$\(|\b(?:then|do|else|if|elif|while|until)\b)\s*` + pyWrap + `$`)
+
+// pyInterpRe: an interpreter given as a quoted string or variable, then flags and -m: the tool word
+// is the module ("${{ steps.py.outputs.python-path }}" -m pip install x).
+var pyInterpRe = regexp.MustCompile(`(?:"[^"]*"|'[^']*'|\$\S+)\s+(?:-\S+\s+)*-m\s+$`)
+
+// pyNoCmd: words whose arguments are text, not commands.
+var pyNoCmd = map[string]bool{"echo": true, "printf": true, "print": true, "cat": true, "grep": true, "which": true,
+	"type": true, "hash": true}
+
+var pyLeadWord = map[string]bool{"if": true, "elif": true, "while": true, "until": true, "then": true, "do": true, "else": true, "!": true}
 
 // HasPyTool reports whether text mentions a Python tool as a word.
 func HasPyTool(text string) bool { return pyToolRe.MatchString(text) }
@@ -33,7 +55,7 @@ var (
 	uvNoInstall = map[string]bool{"version": true, "self": true, "cache": true, "python": true, "venv": true, "tree": true,
 		"export": true, "init": true, "publish": true, "help": true, "auth": true, "format": true}
 	poetryNoInstall = map[string]bool{"config": true, "show": true, "check": true, "env": true, "version": true,
-		"export": true, "publish": true, "run": true, "help": true, "about": true, "list": true, "search": true, "new": true, "init": true, "self": true, "source": true, "remove": true}
+		"export": true, "publish": true, "help": true, "about": true, "list": true, "search": true, "new": true, "init": true, "self": true, "source": true, "remove": true}
 	alwaysOpaque = map[string]bool{"uvx": true, "tox": true, "nox": true, "pre-commit": true, "hatch": true, "pdm": true,
 		"pipenv": true, "pixi": true, "rye": true, "cibuildwheel": true, "pip-sync": true, "pip-compile": true}
 	// value flags of pip, uv and poetry: the next argument is not a package or subcommand
@@ -45,37 +67,84 @@ var (
 		"--retries": true, "--exists-action": true, "--report": true, "--group": true, "--directory": true, "--project": true,
 		"--with": true, "--from": true, "-w": true, "--extra": true, "-E": true, "--extras": true, "--only": true, "--without": true,
 		"--index": true, "--default-index": true, "--upgrade-package": true, "-P": true}
-	pep508Re = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9._-]*)(?:$|[\[<>=!~;@ (])`)
+	redirectRe = regexp.MustCompile(`^\d*[<>]`)
+	redirectOp = regexp.MustCompile(`^\d*(?:<|>>?)$`)
+	pep508Re   = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9._-]*)(?:$|[\[<>=!~;@ (])`)
 )
 
-// PyInstalls returns the Python install and opaque commands in a shell script.
+// PyInstalls returns the Python install and opaque commands in a shell script. A tool word at an
+// unrecognised position (not a command start, not inside another Python command) is Opaque.
 func PyInstalls(text string) []PyInstall {
 	text = continuation.Replace(text)
 	var out []PyInstall
+	inside := 0 // end of the last Python command: its inner words are not commands of their own
 	for _, m := range pyToolRe.FindAllStringSubmatchIndex(text, maxMatches) {
-		wordStart := m[2] // the tool name; a path before it is part of the command word
-		cmdStart := wordStart
-		for cmdStart > 0 && !strings.ContainsRune(" \t\n;&|(", rune(text[cmdStart-1])) {
-			cmdStart--
+		toolStart, toolEnd := m[4], m[5]
+		if toolStart < inside {
+			continue
 		}
+		cmdStart := m[2] // the command word starts with its quote and path
 		lineStart := strings.LastIndexByte(text[:cmdStart], '\n') + 1
-		if !pyStartRe.MatchString(text[lineStart:cmdStart]) {
-			continue // an argument (echo pip install x), not a command
+		prefix := text[lineStart:cmdStart]
+		if pyComment(prefix) {
+			continue
 		}
-		tool := text[m[2]:m[3]]
-		args, capped := commandArgs(strings.TrimPrefix(text[m[3]:], ".exe"))
+		seg := prefix
+		if i := strings.LastIndexAny(seg, ";&|({"); i >= 0 {
+			seg = seg[i+1:]
+		}
+		words := strings.Fields(seg)
+		for len(words) > 0 && pyLeadWord[words[0]] {
+			words = words[1:]
+		}
+		if len(words) > 0 && (pyNoCmd[words[0]] || words[0] == "command" && len(words) > 1 && (words[1] == "-v" || words[1] == "-V")) {
+			continue // echo pip install x: an argument, not a command
+		}
+		tool := strings.ToLower(text[toolStart:toolEnd])
+		rest := text[toolEnd:]
+		if len(rest) >= 4 && strings.EqualFold(rest[:4], ".exe") {
+			rest = rest[4:]
+		}
+		if rest != "" && (rest[0] == '"' || rest[0] == '\'') {
+			rest = rest[1:] // the closing quote of a quoted command word
+		}
+		args, capped := commandArgs(rest)
 		end := len(text)
-		if i := strings.IndexAny(text[m[3]:], "\n;&|)"); i >= 0 {
-			end = m[3] + i
+		if i := strings.IndexAny(rest, "\n;&|)"); i >= 0 {
+			end = len(text) - len(rest) + i
 		}
+		inside = end
 		cmd := strings.TrimSpace(text[cmdStart:end])
+		if !pyStartRe.MatchString(prefix) && !pyInterpRe.MatchString(prefix) {
+			out = append(out, PyInstall{Cmd: cmd, Tool: tool + " (unrecognised position)", Opaque: true})
+			continue
+		}
 		if in, ok := classify(tool, args); ok {
 			in.Cmd = cmd
-			in.Dynamic = in.Dynamic || capped
+			in.Dynamic = in.Dynamic || capped || slices.Contains(words, "xargs") // xargs: packages come from stdin
 			out = append(out, in)
 		}
 	}
 	return out
+}
+
+// pyComment reports whether prefix (the line before a word) is inside a shell comment: a # at a
+// word start with no open quote before it.
+func pyComment(prefix string) bool {
+	var q rune
+	for i, c := range prefix {
+		switch {
+		case q != 0:
+			if c == q {
+				q = 0
+			}
+		case c == '"' || c == '\'':
+			q = c
+		case c == '#' && (i == 0 || prefix[i-1] == ' ' || prefix[i-1] == '\t'):
+			return true
+		}
+	}
+	return false
 }
 
 // positional returns the arguments that are neither flags nor flag values.
@@ -83,6 +152,12 @@ func positional(args []string) []string {
 	var out []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
+		if redirectRe.MatchString(a) {
+			if redirectOp.MatchString(a) {
+				i++ // the operator's target is the next argument
+			}
+			continue
+		}
 		if strings.HasPrefix(a, "-") {
 			if pyValueFlags[a] && !strings.Contains(a, "=") {
 				i++
@@ -106,16 +181,8 @@ func classify(tool string, args []string) (PyInstall, bool) {
 		return ""
 	}
 	switch {
-	case base == "python" || base == "py":
-		if len(args) >= 2 && args[0] == "-m" {
-			switch args[1] {
-			case "pip":
-				return classify("pip", args[2:])
-			case "build":
-				return PyInstall{Tool: "python -m build", Opaque: true}, true
-			}
-		}
-		return PyInstall{}, false
+	case base == "python" || base == "py" || base == "pypy":
+		return classifyInterpreter(args)
 	case base == "pip":
 		s := sub(0)
 		switch {
@@ -159,6 +226,8 @@ func classify(tool string, args []string) (PyInstall, bool) {
 			return PyInstall{}, false
 		case s == "install" || s == "sync" || s == "update":
 			return PyInstall{Tool: "poetry " + s}, true
+		case s == "run": // runs any command, pip among them
+			return PyInstall{Tool: "poetry run", Opaque: true}, true
 		case s == "add":
 			in := PyInstall{Tool: "poetry add"}
 			in.Pkgs, in.Dynamic = pyPkgs(pos[1:])
@@ -179,13 +248,57 @@ func classify(tool string, args []string) (PyInstall, bool) {
 		in.Pkgs, in.Dynamic = pyPkgs(pos)
 		return in, true
 	case alwaysOpaque[tool]:
+		if sub(0) == "run" && (tool == "pdm" || tool == "hatch" || tool == "pipenv" || tool == "rye" || tool == "pixi") {
+			return PyInstall{Tool: tool + " run", Opaque: true}, true
+		}
 		return PyInstall{Tool: tool, Opaque: true}, true
 	case tool == "conda" || tool == "mamba" || tool == "micromamba":
-		if s := sub(0); s == "install" || s == "create" || s == "update" || s == "env" {
+		if s := sub(0); s == "install" || s == "create" || s == "update" || s == "env" || s == "run" {
 			return PyInstall{Tool: tool + " " + s, Opaque: true}, true
 		}
 	case tool == "flit" && sub(0) == "install", tool == "maturin" && sub(0) == "develop":
 		return PyInstall{Tool: tool + " " + sub(0), Opaque: true}, true
+	}
+	return PyInstall{}, false
+}
+
+// pyInterpOpaque are the python -m modules that install or build without a pip line of their own.
+var pyInterpOpaque = map[string]bool{"tox": true, "nox": true, "pre_commit": true, "piptools": true, "hatch": true, "pdm": true}
+
+// setupPyCmds are the setup.py commands that build or install.
+var setupPyCmds = map[string]bool{"install": true, "develop": true, "bdist_wheel": true, "build": true, "sdist": true,
+	"egg_info": true, "bdist_egg": true, "easy_install": true}
+
+// classifyInterpreter reads `python [flags] -m MODULE args` and `python setup.py CMD`.
+func classifyInterpreter(args []string) (PyInstall, bool) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "-m" && i+1 < len(args):
+			return classifyModule(args[i+1], args[i+2:])
+		case strings.HasPrefix(a, "-m") && len(a) > 2:
+			return classifyModule(a[2:], args[i+1:])
+		case a == "-c":
+			return PyInstall{}, false
+		case a == "-X" || a == "-W":
+			i++
+		case strings.HasPrefix(a, "-"):
+		default:
+			if strings.HasSuffix(a, "setup.py") && i+1 < len(args) && setupPyCmds[args[i+1]] {
+				return PyInstall{Tool: "python setup.py " + args[i+1], Opaque: true}, true
+			}
+			return PyInstall{}, false
+		}
+	}
+	return PyInstall{}, false
+}
+
+func classifyModule(mod string, args []string) (PyInstall, bool) {
+	switch {
+	case mod == "pip" || mod == "uv" || mod == "poetry" || mod == "pipx":
+		return classify(mod, args)
+	case mod == "build" || pyInterpOpaque[mod]:
+		return PyInstall{Tool: "python -m " + mod, Opaque: true}, true
 	}
 	return PyInstall{}, false
 }
@@ -231,8 +344,20 @@ func (j *Job) HasPython() bool {
 	if slices.ContainsFunc(slices.Concat(j.Runs, j.Scripts), func(s string) bool { return pyToolRe.MatchString(s) || buildRe.MatchString(s) }) {
 		return true
 	}
-	return j.RunsOpaque() || slices.ContainsFunc(j.Uses, func(u string) bool { return !baseAction(u) })
+	return j.RunsOpaque() || slices.ContainsFunc(j.Runs, pathCmdRe.MatchString) ||
+		slices.ContainsFunc(j.Shells, func(sh string) bool {
+			f := strings.Fields(strings.ToLower(sh))
+			return len(f) == 0 || !plainShell[f[0]]
+		}) ||
+		slices.ContainsFunc(j.Uses, func(u string) bool { return !baseAction(u) })
 }
+
+// pathCmdRe: a command word with a path (script/bootstrap, tools\setup.cmd) runs a repository script.
+var pathCmdRe = regexp.MustCompile(`(?m)(?:^|[;&|({]|\b(?:then|do|else)\b)[ \t]*["']?[^\s;&|()'"]*[/\\]`)
+
+// plainShell are the shells whose commands the scan reads; any other `shell:` (python, a template)
+// runs code it does not see.
+var plainShell = map[string]bool{"bash": true, "sh": true, "pwsh": true, "powershell": true, "cmd": true}
 
 // PyActionsOK reports whether every action of the job is a base action or a Python setup action
 // whose own installs the log shows (actions/setup-python, astral-sh/setup-uv). Other actions may
