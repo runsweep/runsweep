@@ -52,9 +52,6 @@ var (
 	// output that shows an install without a full list of versions
 	partialRe = regexp.MustCompile(`^\s*(?:Audited \d+ packages?|No dependencies to install or update|Installing build dependencies|Building \S+ @ )`)
 	loopRe    = regexp.MustCompile(`\b(?:for|while|xargs)\b`)
-	// a quiet flag (-q, -qq, -qU, --quiet) on a command line
-	quietRe   = regexp.MustCompile(`(?:^|\s)(?:-[a-zA-Z]*q[a-zA-Z]*|--quiet)(?:\s|$)`)
-	fdMergeRe = regexp.MustCompile(`\d>&\d`)
 )
 
 // literals every line worth a regexp contains; the rest of a big log is skipped cheaply
@@ -162,7 +159,6 @@ func (s *section) finish() Section {
 
 var (
 	quotedRe   = regexp.MustCompile(`"[^"]*"|'[^']*'`)
-	afterCmdRe = regexp.MustCompile(`^\s*(?:&>|\|\s*(?:tail|head|grep|sed|awk|cut|wc|xargs)\b)`)
 	envQuietRe = regexp.MustCompile(`(?:^|[\s;&|(])(?:UV|PIP)_QUIET(?:=|:\s*)["']?([^\s"';&|]*)`)
 )
 
@@ -176,26 +172,278 @@ func envQuiet(text string) bool {
 	return false
 }
 
-// quietOutput reports whether an install command asks for quiet output (a flag among its own
-// arguments) or hides it (a redirect in its arguments or a filter right after it).
-func quietOutput(script string) bool {
-	script = fdMergeRe.ReplaceAllString(strings.ReplaceAll(script, "\\\n", " "), "")
-	pos := 0
-	for _, in := range workflow.PyInstalls(script) {
-		if in.Opaque {
-			continue
+// segment is one command of a script with its pipes and redirects; hidden when an enclosing
+// group's output is captured, piped or redirected.
+type segment struct {
+	text   string
+	hidden bool
+}
+
+// group is a (…), { …; }, $(…) or `…` group: segments [start, end) are inside, segment end follows it.
+type group struct {
+	start, end int
+	captured   bool
+}
+
+// segments splits a script into commands on newlines, ;, &&, ||, groups and substitutions,
+// outside quotes, and drops comments. Pipes and redirects stay in their segment.
+func segments(script string) []segment {
+	type frame struct {
+		kind  byte // '(', '$', '`', '{'
+		quote byte // the quote state to restore on close
+		start int
+	}
+	var (
+		segs   []segment
+		groups []group
+		stack  []frame
+		cur    strings.Builder
+		quote  byte
+		param  int // open ${
+	)
+	cut := func() { segs = append(segs, segment{text: cur.String()}); cur.Reset() }
+	wordStart := func() bool {
+		t := cur.String()
+		return t == "" || t[len(t)-1] == ' ' || t[len(t)-1] == '\t'
+	}
+	open := func(kind byte) {
+		stack = append(stack, frame{kind, quote, len(segs) + 1})
+		cut()
+		quote = 0
+	}
+	closeTop := func() {
+		f := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		cut()
+		groups = append(groups, group{f.start, len(segs), f.kind == '$' || f.kind == '`'})
+		quote = f.quote
+	}
+	top := func() byte {
+		if len(stack) == 0 {
+			return 0
 		}
-		i := strings.Index(script[pos:], in.Cmd)
-		if i < 0 {
-			return true // cannot locate the command: assume the worst
+		return stack[len(stack)-1].kind
+	}
+	for i := 0; i < len(script); i++ {
+		c := script[i]
+		next := byte(0)
+		if i+1 < len(script) {
+			next = script[i+1]
 		}
-		pos += i + len(in.Cmd)
-		cmd := quotedRe.ReplaceAllString(in.Cmd, "")
-		if quietRe.MatchString(cmd) || strings.Contains(cmd, ">") || afterCmdRe.MatchString(script[pos:]) {
+		switch {
+		case quote == '\'':
+			if c == '\'' {
+				quote = 0
+			}
+			cur.WriteByte(c)
+		case c == '\\' && next != 0:
+			cur.WriteByte(c)
+			cur.WriteByte(next)
+			i++
+		case c == '$' && next == '(':
+			i++
+			open('$')
+		case c == '`':
+			if top() == '`' {
+				closeTop()
+			} else {
+				open('`')
+			}
+		case quote == '"':
+			if c == '"' {
+				quote = 0
+			}
+			cur.WriteByte(c)
+		case c == '\'' || c == '"':
+			quote = c
+			cur.WriteByte(c)
+		case c == '#' && wordStart():
+			for i+1 < len(script) && script[i+1] != '\n' {
+				i++
+			}
+		case c == '\n' || c == ';':
+			cut()
+		case (c == '&' || c == '|') && next == c:
+			i++
+			cut()
+		case c == '$' && next == '{':
+			i++
+			param++
+			cur.WriteString("${")
+		case c == '(':
+			open('(')
+		case c == ')':
+			if t := top(); t == '(' || t == '$' {
+				closeTop()
+			} else {
+				cut()
+			}
+		case c == '{' && wordStart() && (next == 0 || next == ' ' || next == '\t' || next == '\n'):
+			open('{')
+		case c == '}' && param > 0:
+			param--
+			cur.WriteByte(c)
+		case c == '}' && top() == '{' && wordStart():
+			closeTop()
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	cut()
+	for _, g := range groups {
+		if g.captured || g.end < len(segs) && hidesOutput(pipeline(segs[g.end].text)) {
+			for i := g.start; i < g.end; i++ {
+				segs[i].hidden = true
+			}
+		}
+	}
+	return segs
+}
+
+// pipeline splits a command on unquoted | (and |&).
+func pipeline(seg string) []string {
+	var (
+		out   []string
+		quote byte
+		last  int
+	)
+	for i := 0; i < len(seg); i++ {
+		switch c := seg[i]; {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			} else if c == '\\' && quote == '"' {
+				i++
+			}
+		case c == '\\':
+			i++
+		case c == '\'' || c == '"':
+			quote = c
+		case c == '|':
+			out = append(out, seg[last:i])
+			if i+1 < len(seg) && seg[i+1] == '&' {
+				i++
+			}
+			last = i + 1
+		}
+	}
+	return append(out, seg[last:])
+}
+
+// hidesOutput reports whether a pipeline, from the command whose output matters on, redirects
+// stdout or pipes it into anything but tee.
+func hidesOutput(els []string) bool {
+	for i, el := range els {
+		if i > 0 && firstWord(el) != "tee" || redirectsStdout(quotedRe.ReplaceAllString(el, "")) {
 			return true
 		}
 	}
 	return false
+}
+
+// redirectsStdout reports whether unquoted text redirects fd 1: >, >>, 1>, &>, >&; 2> alone does not.
+func redirectsStdout(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] != '>' {
+			continue
+		}
+		j := i
+		for j > 0 && s[j-1] >= '0' && s[j-1] <= '9' {
+			j--
+		}
+		switch {
+		case j < i && (j == 0 || s[j-1] == ' ' || s[j-1] == '\t'): // a file descriptor number
+			if s[j:i] == "1" {
+				return true
+			}
+		case i > 0 && s[i-1] == '>': // the second > of >>
+		default:
+			return true
+		}
+		for i+1 < len(s) && s[i+1] == '>' {
+			i++
+		}
+	}
+	return false
+}
+
+func firstWord(s string) string {
+	if f := strings.Fields(s); len(f) > 0 {
+		return f[0]
+	}
+	return ""
+}
+
+func countInstalls(text string) int {
+	n := 0
+	for _, in := range workflow.PyInstalls(text) {
+		if !in.Opaque {
+			n++
+		}
+	}
+	return n
+}
+
+var (
+	quietRe   = regexp.MustCompile(`(?:^|\s)(?:-[a-zA-Z]*q[a-zA-Z]*|--quiet)(?:[\s=]|$)`)
+	textWords = map[string]bool{"echo": true, "printf": true, "print": true, "cat": true}
+	leadWords = map[string]bool{"then": true, "do": true, "else": true, "if": true, "elif": true, "while": true, "until": true, "!": true}
+	endWords  = map[string]bool{"fi": true, "done": true, "esac": true}
+)
+
+// joinLines joins shell (\) and PowerShell (`) continued lines. A line ending in a backtick
+// with an even count of backticks closes a substitution instead, and is kept.
+func joinLines(script string) string {
+	lines := strings.Split(strings.ReplaceAll(script, "\r\n", "\n"), "\n")
+	var b strings.Builder
+	for i, l := range lines {
+		switch {
+		case i == len(lines)-1:
+			b.WriteString(l)
+		case strings.HasSuffix(l, "\\") || strings.HasSuffix(l, "`") && strings.Count(l, "`")%2 == 1:
+			b.WriteString(l[:len(l)-1] + " ")
+		default:
+			b.WriteString(l + "\n")
+		}
+	}
+	return b.String()
+}
+
+// quietOutput reports whether an install command of the script asks for quiet output (a quiet
+// flag) or hides it (stdout redirected, piped into anything but tee, captured by $(…), or the same
+// done to its enclosing group, if-block or loop).
+func quietOutput(script string) bool {
+	script = joinLines(script)
+	found := 0
+	for _, seg := range segments(script) {
+		text := strings.TrimSpace(seg.text)
+		w := firstWord(text)
+		for leadWords[w] {
+			text = strings.TrimSpace(text[len(w):])
+			w = firstWord(text)
+		}
+		if endWords[w] {
+			if hidesOutput(pipeline(text[len(w):])) {
+				return true // fi | tail: the block's output is hidden
+			}
+			continue
+		}
+		els := pipeline(text)
+		for i, el := range els {
+			if textWords[firstWord(el)] {
+				continue
+			}
+			n := countInstalls(el)
+			if n == 0 {
+				continue
+			}
+			found += n
+			if seg.hidden || hidesOutput(els[i:]) || quietRe.MatchString(quotedRe.ReplaceAllString(strings.Join(els[i:], " "), "")) {
+				return true
+			}
+		}
+	}
+	return found < countInstalls(script) // an install no segment accounts for: assume the worst
 }
 
 // alternatives counts install commands that never run together: a script with a single

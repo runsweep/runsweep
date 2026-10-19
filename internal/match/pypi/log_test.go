@@ -347,3 +347,58 @@ func TestParseLogQuietEnvAndScope(t *testing.T) {
 		}
 	}
 }
+
+func TestParseLogQuietSegments(t *testing.T) {
+	// every step also runs a second install with its own listing, and three listings are printed:
+	// only quiet detection decides
+	out := []string{"Successfully installed x-1", "Successfully installed z-1", "Successfully installed w-1"}
+	for script, complete := range map[string]bool{
+		"# pip install x\npip install x | tail -1":            false,
+		"echo \"pip install x\"\npip install x | tail -1":     false,
+		"(pip install x) | tail":                              false,
+		"{ pip install x; } > /dev/null":                      false,
+		"{\n  pip install x\n} > log.txt":                     false,
+		"out=$(pip install x)":                                false,
+		"echo \"$(pip install x)\"":                           false,
+		"echo `pip install x`":                                false,
+		"if true; then pip install x; fi | tail -1":           false,
+		"pip install -qr r.txt":                               false,
+		"pip -q install x":                                    false,
+		"python -m pip install --quiet x":                     false,
+		"uv pip install -q x":                                 false,
+		"poetry install -q":                                   false,
+		"poetry -q install":                                   false,
+		"pip install x 2>&1 >/dev/null":                       false,
+		"pip install x >/dev/null 2>&1":                       false,
+		"pip install x &> /dev/null":                          false,
+		"pip install x 1>/dev/null":                           false,
+		"pip install x >&2":                                   false,
+		"pip install x | grep -v foo":                         false,
+		"pip install x |& tail":                               false,
+		"pip install x | tee log.txt > /dev/null":             false,
+		"if true; then pip install -q x; fi":                  false,
+		"pip install \\\n  -q x":                              false,
+		"pip install x \\\n  | tail -1":                       false,
+		"pip install x \\\n  > /dev/null":                     false,
+		"pip install x `\n  --quiet":                          false,
+		"pip install x `\n  | Out-Null":                       false,
+		"cat r.txt | pip install -q -r /dev/stdin":            false,
+		"pip install x=='1' | tail":                           false,
+		"pip install \"numpy>1.20\"":                          true,
+		"pip install -r r.txt && pytest -q":                   true,
+		"pip install x 2>err.txt":                             true,
+		"pip install x | tee log.txt":                         true,
+		"(pip install x)":                                     true,
+		"{ pip install x; } 2>err.txt":                        true,
+		"pip install ${PKG_SPEC:-x} | tail":                   false,
+		"pip install x  # | tail -q":                          true,
+		"echo '| tail -q >'\npip install x":                   true,
+		"cat r.txt | pip install -r /dev/stdin":               true,
+		"if true; then pip install x; else pip install y; fi": true,
+	} {
+		s := sectionOf(t, step(script+"\npip install z", out...))
+		if s.Complete != complete {
+			t.Errorf("%q: complete=%v, want %v", script, s.Complete, complete)
+		}
+	}
+}

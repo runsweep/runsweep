@@ -7,6 +7,7 @@ func FuzzParsePyLog(f *testing.F) {
 	f.Add(step("uv sync", "Installed 1 package in 1ms", " + a==1"))
 	f.Add(step("poetry install", "Package operations: 1 install, 0 updates, 0 removals", "  - Installing a (1)"))
 	f.Add("##[group]Run \n\x1b[36;1m\n##[endgroup]\nSuccessfully installed -\n")
+	f.Add(step("{ (pip install -q x) | tail; } > /dev/null\necho \"$(pip install `y`)\" # ${A:-}", "Successfully installed x-1"))
 	f.Fuzz(func(t *testing.T, s string) {
 		l := ParseLog(s)
 		for _, in := range l.Installs {
