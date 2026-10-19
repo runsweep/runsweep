@@ -16,6 +16,7 @@ import (
 	"github.com/runsweep/runsweep/internal/incident"
 	"github.com/runsweep/runsweep/internal/match/actions"
 	"github.com/runsweep/runsweep/internal/match/npm"
+	"github.com/runsweep/runsweep/internal/match/pypi"
 	"github.com/runsweep/runsweep/internal/model"
 	"github.com/runsweep/runsweep/internal/report"
 	"github.com/runsweep/runsweep/internal/rotate"
@@ -70,11 +71,13 @@ type Options struct {
 }
 
 type scanner struct {
-	src source.Source
-	inc *incident.Incident
-	wf  sync.Map // repo@sha:path and blob:<sha> -> wfEntry
-	npm npm.Cache
-	pub sync.Map // repo -> bool: public, so its called workflows may be read
+	src     source.Source
+	inc     *incident.Incident
+	wf      sync.Map // repo@sha:path and blob:<sha> -> wfEntry
+	npm     npm.Cache
+	pypi    pypi.Cache
+	pypiBad pypi.Bad
+	pub     sync.Map // repo -> bool: public, so its called workflows may be read
 }
 
 // public reports whether repo is public; an error counts as not public (its call stays unread).
@@ -135,6 +138,7 @@ func Run(ctx context.Context, src source.Source, inc *incident.Incident, opt Opt
 	res := &model.Result{ReposTargeted: len(repos), IncidentID: inc.ID, Start: inc.Window.Start, End: inc.Window.End,
 		Lookback: opt.Lookback}
 	s := &scanner{src: src, inc: inc}
+	s.pypiBad = pypi.NewBad(inc.PyPI)
 	var stopErr error
 	for i, repo := range repos {
 		runs, err := src.ListRuns(ctx, repo, inc.Window.Start.Add(-opt.Lookback), inc.Window.End)
@@ -368,6 +372,16 @@ func (s *scanner) scanRun(ctx context.Context, repo string, run source.Run) ([]m
 		}
 	}
 
+	var pyRes pypi.Result
+	if len(s.inc.PyPI) > 0 {
+		pyRes, err = s.pypi.Match(ctx, s.src, repo, run.HeadSHA, s.pypiBad)
+		if soft(err) {
+			pyRes.Failed = append(pyRes.Failed, "commit tree") // reason text: "lockfile not read: commit tree"
+		} else if err != nil {
+			return nil, 0, err
+		}
+	}
+
 	// These events run the workflow from the base branch, so head_sha files may not be what ran.
 	baseEvent := run.Event == "pull_request_target" || run.Event == "workflow_run"
 	// uses: read from head_sha prove nothing about the file that ran
@@ -409,13 +423,14 @@ func (s *scanner) scanRun(ctx context.Context, repo string, run source.Run) ([]m
 		var installs []workflow.RunInstall
 		if rj != nil {
 			installs = rj.RunInstalls()
-		} else if len(s.inc.NPM) > 0 && !strings.HasPrefix(run.Path, "dynamic/") { // dynamic workflows have no file
+		} else if (len(s.inc.NPM) > 0 || len(s.inc.PyPI) > 0) && !strings.HasPrefix(run.Path, "dynamic/") { // dynamic workflows have no file
 			f.Status = model.Worse(f.Status, model.Unchecked)
 			f.Evidence = append(f.Evidence, note("workflow file unavailable (%s): run-time installs not checked", wfReason))
 		}
 		var log string
 		var logErr = errLogNotRead
-		if len(s.inc.Actions) > 0 || npmRes.Status > model.Clean || len(npmRes.Unlocked) > 0 || len(installs) > 0 {
+		if len(s.inc.Actions) > 0 || npmRes.Status > model.Clean || len(npmRes.Unlocked) > 0 || len(installs) > 0 ||
+			len(s.inc.PyPI) > 0 && pypiNeedsLog(wj, rj) {
 			log, logErr = s.src.JobLog(ctx, repo, job.ID)
 			if logErr != nil && !soft(logErr) {
 				return out, len(jobs), logErr
@@ -508,6 +523,11 @@ func (s *scanner) scanRun(ctx context.Context, repo string, run source.Run) ([]m
 				f.Status = model.Worse(f.Status, model.Possible)
 				f.Evidence = append(f.Evidence, model.Evidence{Kind: "npm", Detail: fmt.Sprintf("runs `%s` at run time", in.Cmd)})
 			}
+		}
+		if len(s.inc.PyPI) > 0 {
+			st, ev := s.pypiJob(wj, rj, log, logErr, pyRes)
+			f.Status = model.Worse(f.Status, st)
+			f.Evidence = append(f.Evidence, ev...)
 		}
 		if len(s.inc.Actions) > 0 {
 			var st model.Status
@@ -663,7 +683,7 @@ func (s *scanner) follow(ctx context.Context, home, repo, sha string, wf *workfl
 		}
 		call, ok := workflow.ParseCall(uses)
 		if !ok {
-			if len(s.inc.NPM) > 0 && !strings.HasPrefix(uses, "./") { // may install anything; its log does not name it
+			if (len(s.inc.NPM) > 0 || len(s.inc.PyPI) > 0) && !strings.HasPrefix(uses, "./") { // may install anything; its log does not name it
 				c.status = model.Unchecked
 			}
 			c.notes = append(c.notes, note("called workflow %s is not pinned to a SHA — not read", uses))

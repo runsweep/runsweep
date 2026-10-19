@@ -36,7 +36,7 @@ func Worse(a, b Status) Status {
 	return b
 }
 
-// Evidence explains why a status was assigned. Kind is "npm", "action" or "note".
+// Evidence explains why a status was assigned. Kind is "npm", "pypi", "action" or "note".
 type Evidence struct {
 	Kind   string `json:"kind"`
 	Detail string `json:"detail"`

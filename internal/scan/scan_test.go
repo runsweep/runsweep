@@ -1691,3 +1691,7 @@ func TestWorkflowUnavailableSecretsUnknown(t *testing.T) {
 		t.Fatalf("%+v", res.Findings)
 	}
 }
+
+func hasEvidence(f model.Finding, sub string) bool {
+	return slices.ContainsFunc(f.Evidence, func(e model.Evidence) bool { return strings.Contains(e.Detail, sub) })
+}
