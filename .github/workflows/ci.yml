@@ -67,6 +67,7 @@ jobs:
           - {pkg: ./internal/workflow, target: FuzzParseTokenPerms}
           - {pkg: ./internal/workflow, target: FuzzPyInstalls}
           - {pkg: ./internal/match/actions, target: FuzzMatchLog}
+          - {pkg: ./internal/match/pypi, target: FuzzParsePyLog}
           - {pkg: ./internal/incident, target: FuzzIncidentParse}
           - {pkg: ./internal/report, target: FuzzClean}
           - {pkg: ./internal/report, target: FuzzMarkdown}
