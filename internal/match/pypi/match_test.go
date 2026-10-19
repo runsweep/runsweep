@@ -28,6 +28,12 @@ func TestMatch(t *testing.T) {
 	if fmt.Sprint(r.Failed) != "[broken/uv.lock pdm.lock]" || r.Truncated {
 		t.Errorf("failed: %v truncated %v", r.Failed, r.Truncated)
 	}
+	// a manifest with a bad pin and an unreadable line is both pinned and failed
+	h := sourcetest.New()
+	h.AddFile("o/a", "t", "requirements.txt", []byte("litellm==1.82.8\nother==zz\n"))
+	if r, _ := c.Match(context.Background(), h, "o/a", "t", bad); len(r.Pinned) != 1 || fmt.Sprint(r.Failed) != "[requirements.txt]" {
+		t.Errorf("partial: %+v", r)
+	}
 	// over the cap
 	g := sourcetest.New()
 	for i := 0; i <= maxManifests; i++ {
