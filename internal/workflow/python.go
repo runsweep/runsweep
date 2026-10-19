@@ -3,14 +3,39 @@ package workflow
 import (
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/runsweep/runsweep/internal/pep"
 )
 
-// pyToolRe finds a Python tool word, case-insensitively. Group 1 is what precedes the word in the
-// same command word: a quote and/or a path (.venv/bin/, "$VENV/bin/, "/my dir/); group 2 is the tool.
-var pyToolRe = regexp.MustCompile(`(?i)(?:^|[^\w./-])("[^"\n]*/|'[^'\n]*/|["']?(?:[^\s;&|()'"` + "`" + `]*/)?)(pip-sync|pip-compile|pre-commit|cibuildwheel|micromamba|pipenv|python(?:\d+(?:\.\d+)*)?|pypy(?:\d+(?:\.\d+)*)?|pipx|pip(?:\d+(?:\.\d+)*)?|poetry|pixi|py|uvx|uv|pdm|hatch|tox|nox|conda|mamba|rye|flit|maturin)(?:\.exe)?["']?`)
+// pyWordRe is a Python tool word, case-insensitively, with its version and .exe suffix. pyWords
+// checks its neighbours in code: the regexp never consumes them, so quotes, paths and adjacent
+// words never hide an occurrence.
+var pyWordRe = regexp.MustCompile(`(?i)(?:pip-sync|pip-compile|pre-commit|cibuildwheel|micromamba|pipenv|python(?:\d+(?:\.\d+)*)?|pypy(?:\d+(?:\.\d+)*)?|pipx|pip(?:\d+(?:\.\d+)*)?|poetry|pixi|py|uvx|uv|pdm|hatch|tox|nox|conda|mamba|rye|flit|maturin)(?:\.exe)?`)
+
+func pyWordByte(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-'
+}
+
+// pyWords returns the [start, end) of every Python tool word in text: not preceded by a word
+// character or '.', not followed by a word character, a path separator (python/ is a directory)
+// or a file extension (uv.lock, tox.ini). A '/' or '\' before the word is a path to it.
+func pyWords(text string) [][]int {
+	var out [][]int
+	for _, m := range pyWordRe.FindAllStringIndex(text, -1) {
+		s, e := m[0], m[1]
+		if s > 0 && (pyWordByte(text[s-1]) || text[s-1] == '.') {
+			continue
+		}
+		if e < len(text) && (pyWordByte(text[e]) || text[e] == '/' || text[e] == '\\' ||
+			text[e] == '.' && e+1 < len(text) && pyWordByte(text[e+1]) && text[e+1] != '-' && text[e+1] != '_') {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
+}
 
 const (
 	pyAssign = `[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|\S*)`
@@ -36,22 +61,9 @@ var pyNoCmd = map[string]bool{"echo": true, "printf": true, "print": true, "cat"
 
 var pyLeadWord = map[string]bool{"if": true, "elif": true, "while": true, "until": true, "then": true, "do": true, "else": true, "!": true}
 
-// HasPyTool reports whether text mentions a Python tool as a word.
-func HasPyTool(text string) bool { return len(pyToolMatches(text, 1)) > 0 }
-
-// pyToolMatches finds the tool words that end a word (the regexp does not consume what follows, so
-// the next line's first word is not skipped). n caps the matches read.
-func pyToolMatches(text string, n int) [][]int {
-	var out [][]int
-	for _, m := range pyToolRe.FindAllStringSubmatchIndex(text, maxMatches) {
-		if m[1] == len(text) || strings.IndexByte(" \t;&|)\n", text[m[1]]) >= 0 {
-			if out = append(out, m); len(out) == n {
-				break
-			}
-		}
-	}
-	return out
-}
+// HasPyTool reports whether text mentions a Python tool as a word, anywhere: quoted, in a path,
+// in an argument. A step whose script has one has its log read.
+func HasPyTool(text string) bool { return len(pyWords(text)) > 0 }
 
 // PyInstall is a Python command that installs packages, or an opaque one that installs or runs
 // sdist code without listing versions.
@@ -86,64 +98,138 @@ var (
 	pep508Re   = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9._-]*)(?:$|[\[<>=!~;@ (])`)
 )
 
-// PyInstalls returns the Python install and opaque commands in a shell script. A tool word at an
-// unrecognised position (not a command start, not inside another Python command) is Opaque.
+// PyInstalls returns the Python install and opaque commands in a shell script. Every tool word is
+// accounted for: an argument of a Python command already read, a comment or echo-like argument, a
+// command at a recognised start (classified), or else Opaque "<tool> (unrecognised position)".
 func PyInstalls(text string) []PyInstall {
-	text = continuation.Replace(text)
-	var out []PyInstall
+	out, _, _ := pyScan(continuation.Replace(text))
+	return out
+}
+
+// pyScan is PyInstalls on joined lines. spans are the [start, end) ranges whose tool words were
+// read as part of a command (an accepted command, an unrecognised word, the own flags of uv run);
+// skipped are the word starts left out as comment or echo-like text.
+func pyScan(text string) (out []PyInstall, spans [][2]int, skipped []int) {
 	inside := 0 // end of the last Python command: its inner words are not commands of their own
-	for _, m := range pyToolMatches(text, maxMatches) {
-		toolStart, toolEnd := m[4], m[5]
-		if toolStart < inside {
+	runAt := -1 // start of the command run by the last uv run / poetry run: a command start
+	words := pyWords(text)
+	if len(words) > maxMatches {
+		return []PyInstall{{Cmd: text, Tool: "more than " + strconv.Itoa(maxMatches) + " Python tool words", Opaque: true}}, [][2]int{{0, len(text)}}, nil
+	}
+	for _, m := range words {
+		wordStart, wordEnd := m[0], m[1]
+		if wordStart < inside {
 			continue
 		}
-		cmdStart := m[2] // the command word starts with its quote and path
-		lineStart := strings.LastIndexByte(text[:cmdStart], '\n') + 1
-		prefix := text[lineStart:cmdStart]
-		if pyComment(prefix) {
+		lineStart := strings.LastIndexByte(text[:wordStart], '\n') + 1
+		cmdStart := pyCmdStart(text, lineStart, wordStart)
+		linePrefix := text[lineStart:cmdStart]
+		prefix := linePrefix
+		if runAt >= lineStart && runAt <= cmdStart {
+			prefix = text[runAt:cmdStart] // uv run sh -c '…': the inner command is a command line of its own
+		}
+		if pyComment(linePrefix) {
+			skipped = append(skipped, wordStart)
 			continue
 		}
 		seg := prefix
 		if i := strings.LastIndexAny(seg, ";&|({`"); i >= 0 {
 			seg = seg[i+1:]
 		}
-		words := strings.Fields(seg)
-		for len(words) > 0 && pyLeadWord[words[0]] {
-			words = words[1:]
+		lead := strings.Fields(seg)
+		for len(lead) > 0 && pyLeadWord[lead[0]] {
+			lead = lead[1:]
 		}
-		if len(words) > 0 && (pyNoCmd[words[0]] || words[0] == "command" && len(words) > 1 && (words[1] == "-v" || words[1] == "-V")) {
+		if len(lead) > 0 && (pyNoCmd[lead[0]] || lead[0] == "command" && len(lead) > 1 && (lead[1] == "-v" || lead[1] == "-V")) {
+			skipped = append(skipped, wordStart)
 			continue // echo pip install x: an argument, not a command
 		}
-		tool := strings.ToLower(text[toolStart:toolEnd])
-		rest := text[toolEnd:]
-		if len(rest) >= 4 && strings.EqualFold(rest[:4], ".exe") {
-			rest = rest[4:]
-		}
+		tool := strings.TrimSuffix(strings.ToLower(text[wordStart:wordEnd]), ".exe")
+		rest := text[wordEnd:]
 		if rest != "" && (rest[0] == '"' || rest[0] == '\'') {
 			rest = rest[1:] // the closing quote of a quoted command word
 		}
 		restStart := len(text) - len(rest)
-		if i := strings.IndexByte(rest, '`'); i >= 0 && strings.Count(prefix, "`")%2 == 1 {
+		if i := strings.IndexByte(rest, '`'); i >= 0 && strings.Count(linePrefix, "`")%2 == 1 {
 			rest = rest[:i] // inside a backtick substitution: it ends at the closing backtick
 		}
-		args, capped := commandArgs(rest)
+		args, offs, capped := pyArgs(rest)
 		end := restStart + len(rest)
 		if i := strings.IndexAny(rest, "\n;&|)"); i >= 0 {
 			end = restStart + i
 		}
-		inside = end
 		cmd := strings.TrimSpace(text[cmdStart:end])
+		if i := strings.LastIndexAny(prefix, ";&|`"); i >= 0 {
+			prefix = prefix[i:] // both regexps read the last command only: a long line stays linear
+		}
 		if !pyStartRe.MatchString(prefix) && !pyInterpRe.MatchString(prefix) {
+			inside = end
+			spans = append(spans, [2]int{cmdStart, end})
 			out = append(out, PyInstall{Cmd: cmd, Tool: tool + " (unrecognised position)", Opaque: true})
 			continue
 		}
+		inside = end
+		if k := runInner(tool, args); k >= 0 {
+			// uv run / poetry run: only their own flags are inside; the command they run is read on its own
+			inside, runAt = restStart+offs[k], restStart+offs[k]
+		}
+		spans = append(spans, [2]int{cmdStart, inside})
 		if in, ok := classify(tool, args); ok {
 			in.Cmd = cmd
-			in.Dynamic = in.Dynamic || capped || slices.Contains(words, "xargs") // xargs: packages come from stdin
+			in.Dynamic = in.Dynamic || capped || slices.Contains(lead, "xargs") // xargs: packages come from stdin
 			out = append(out, in)
 		}
 	}
-	return out
+	return out, spans, skipped
+}
+
+// pyCmdStart returns where the command word holding the tool word at wordStart begins: its path
+// ($VENV/bin/, "/my dir/) and an opening quote.
+func pyCmdStart(text string, lineStart, wordStart int) int {
+	start := wordStart
+	if start > lineStart && (text[start-1] == '/' || text[start-1] == '\\') {
+		for start > lineStart && !strings.ContainsRune(" \t;&|()'\"`", rune(text[start-1])) {
+			start--
+		}
+		if start > lineStart && text[start-1] == ' ' {
+			// a quoted path with spaces: an opening quote before it with no command separator between
+			line := text[lineStart:start]
+			if q := strings.LastIndexAny(line, `"'`); q >= 0 && strings.Count(line[:q], line[q:q+1])%2 == 0 &&
+				!strings.ContainsAny(line[q:], ";&|()`") {
+				return lineStart + q
+			}
+		}
+	}
+	if start > lineStart && (text[start-1] == '"' || text[start-1] == '\'') {
+		start--
+	}
+	return start
+}
+
+// pyArgs is commandArgs that also returns where each argument starts in s (its quote included).
+func pyArgs(s string) (args []string, offs []int, capped bool) {
+	for i, n := 0, 0; i < len(s); {
+		switch c := s[i]; {
+		case c == '\n' || c == ';' || c == '&' || c == '|' || c == ')':
+			return args, offs, false
+		case argSep[c]:
+			i++
+		default:
+			if n++; n > maxArgs {
+				return args, offs, true
+			}
+			j := i
+			for j < len(s) && !argSep[s[j]] {
+				j++
+			}
+			// a leading backtick stays: it marks a command substitution
+			if f := strings.TrimRight(strings.TrimLeft(s[i:j], `'",`), "'\"`,"); f != "" {
+				args, offs = append(args, f), append(offs, i)
+			}
+			i = j
+		}
+	}
+	return args, offs, false
 }
 
 // pyComment reports whether prefix (the line before a word) is inside a shell comment: a # at a
@@ -235,16 +321,19 @@ func classify(tool string, args []string) (PyInstall, bool) {
 			return in, true
 		case s == "pip" || s == "tool":
 			return PyInstall{Tool: "uv " + s + " " + sub(1), Opaque: true}, true
-		case s == "run":
-			rest := runCommand(afterFirstPositional(args))
-			for _, a := range args {
+		case s == "run": // uv's own output shows what it syncs; PyInstalls reads the command it runs
+			own, script := args, ""
+			if k := runInner("uv", args); k >= 0 {
+				own, script = args[:k], args[k]
+			}
+			for _, a := range own {
 				name, _, _ := strings.Cut(a, "=")
 				if slices.Contains([]string{"--with", "--with-requirements", "--with-editable", "--isolated", "-q", "--quiet", "--script"}, name) ||
-					name == "--no-project" && len(rest) > 0 && strings.HasSuffix(rest[0], ".py") {
+					name == "--no-project" && strings.HasSuffix(script, ".py") {
 					return PyInstall{Tool: "uv run", Opaque: true}, true
 				}
 			}
-			return classifyInner(rest) // uv's own output shows what it syncs
+			return PyInstall{}, false
 		default: // lock, build and anything unknown
 			return PyInstall{Tool: "uv " + s, Opaque: true}, true
 		}
@@ -254,8 +343,8 @@ func classify(tool string, args []string) (PyInstall, bool) {
 			return PyInstall{}, false
 		case s == "install" || s == "sync" || s == "update":
 			return PyInstall{Tool: "poetry " + s}, true
-		case s == "run":
-			return classifyInner(runCommand(afterFirstPositional(args)))
+		case s == "run": // installs nothing; PyInstalls reads the command it runs
+			return PyInstall{}, false
 		case s == "add":
 			in := PyInstall{Tool: "poetry add"}
 			in.Pkgs, in.Dynamic = pyPkgs(pos[1:])
@@ -297,67 +386,80 @@ var pyInterpOpaque = map[string]bool{"tox": true, "nox": true, "pre_commit": tru
 var setupPyCmds = map[string]bool{"install": true, "develop": true, "bdist_wheel": true, "build": true, "sdist": true,
 	"egg_info": true, "bdist_egg": true, "easy_install": true}
 
-// afterFirstPositional returns the arguments after the first one that is neither a flag nor a flag
-// value, and runCommand the arguments from that first one on: for `uv run [flags] cmd args` the
-// command and its arguments.
-func afterFirstPositional(args []string) []string {
-	if c := runCommand(args); len(c) > 0 {
-		return c[1:]
-	}
-	return nil
-}
+// runValueFlags are the flags of uv and poetry, before and after run, whose value is the next argument.
+var runValueFlags = map[string]bool{"--directory": true, "--project": true, "-C": true, "-P": true, "--config-file": true,
+	"--cache-dir": true, "--color": true, "--python": true, "-p": true, "--with": true, "--with-editable": true,
+	"--with-requirements": true, "--env-file": true, "--package": true, "--extra": true, "--no-extra": true, "--group": true,
+	"--no-group": true, "--only-group": true, "--index": true, "--default-index": true, "--index-url": true, "-i": true,
+	"--extra-index-url": true, "--find-links": true, "-f": true, "--index-strategy": true, "--keyring-provider": true,
+	"--resolution": true, "--prerelease": true, "--exclude-newer": true, "--link-mode": true, "--refresh-package": true,
+	"--reinstall-package": true, "--upgrade-package": true, "--no-build-package": true, "--no-binary-package": true,
+	"--config-setting": true, "--python-platform": true, "--allow-insecure-host": true, "--fork-strategy": true}
 
-func runCommand(args []string) []string {
+// runInner returns the index in args (the arguments after the tool word) of the command that
+// `uv run` or `poetry run` runs, python -m uv|poetry included, or -1. Flags are skipped, known value
+// flags with their value; any other word is taken as the command, so a tool word after an unknown
+// flag's value is not at a command start.
+func runInner(tool string, args []string) int {
+	if base := strings.TrimRight(tool, "0123456789."); base == "python" || base == "py" || base == "pypy" {
+		mod, i := pyModule(args)
+		if mod != "uv" && mod != "poetry" {
+			return -1
+		}
+		if k := runInner(mod, args[i:]); k >= 0 {
+			return i + k
+		}
+		return -1
+	}
+	if tool != "uv" && tool != "poetry" {
+		return -1
+	}
+	run := false
 	for i := 0; i < len(args); i++ {
-		a := args[i]
-		switch {
-		case redirectRe.MatchString(a):
-			if redirectOp.MatchString(a) {
-				i++
-			}
+		switch a := args[i]; {
 		case strings.HasPrefix(a, "-"):
-			if pyValueFlags[a] && !strings.Contains(a, "=") {
+			if runValueFlags[a] {
 				i++
 			}
+		case run:
+			return i
+		case a == "run":
+			run = true
 		default:
-			return args[i:]
+			return -1
 		}
 	}
-	return nil
+	return -1
 }
 
-// classifyInner classifies the command run by `poetry run` and `uv run`, which install nothing themselves.
-func classifyInner(cmd []string) (PyInstall, bool) {
-	if len(cmd) == 0 {
-		return PyInstall{}, false
-	}
-	tool := strings.ToLower(cmd[0])
-	if i := strings.LastIndexAny(tool, `/\`); i >= 0 {
-		tool = tool[i+1:]
-	}
-	return classify(strings.TrimSuffix(tool, ".exe"), cmd[1:])
-}
-
-// classifyInterpreter reads `python [flags] -m MODULE args` and `python setup.py CMD`.
-func classifyInterpreter(args []string) (PyInstall, bool) {
+// pyModule reads `python [flags] -m MODULE`: the module and the index of its first argument, or ""
+// and the index of the first argument that is not an interpreter flag.
+func pyModule(args []string) (string, int) {
 	for i := 0; i < len(args); i++ {
-		a := args[i]
-		switch {
+		switch a := args[i]; {
 		case a == "-m" && i+1 < len(args):
-			return classifyModule(args[i+1], args[i+2:])
+			return args[i+1], i + 2
 		case strings.HasPrefix(a, "-m") && len(a) > 2:
-			return classifyModule(a[2:], args[i+1:])
-		case a == "-c": // inline code may run pip
-			return PyInstall{Tool: "python -c", Opaque: true}, true
+			return a[2:], i + 1
 		case a == "-X" || a == "-W":
 			i++
-		case strings.HasPrefix(a, "-"):
-		default:
-			if strings.HasSuffix(a, "setup.py") && i+1 < len(args) && setupPyCmds[args[i+1]] {
-				return PyInstall{Tool: "python setup.py " + args[i+1], Opaque: true}, true
-			}
-			return PyInstall{}, false
+		case a == "-c" || !strings.HasPrefix(a, "-"):
+			return "", i
 		}
+	}
+	return "", len(args)
+}
+
+// classifyInterpreter reads `python [flags] -m MODULE args`, `python -c` and `python setup.py CMD`.
+func classifyInterpreter(args []string) (PyInstall, bool) {
+	mod, i := pyModule(args)
+	switch {
+	case mod != "":
+		return classifyModule(mod, args[i:])
+	case i < len(args) && args[i] == "-c": // inline code may run pip
+		return PyInstall{Tool: "python -c", Opaque: true}, true
+	case i+1 < len(args) && strings.HasSuffix(args[i], "setup.py") && setupPyCmds[args[i+1]]:
+		return PyInstall{Tool: "python setup.py " + args[i+1], Opaque: true}, true
 	}
 	return PyInstall{}, false
 }

@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -58,10 +59,19 @@ func FuzzParseTokenPerms(f *testing.F) {
 }
 
 func FuzzPyInstalls(f *testing.F) {
-	for _, s := range []string{"pip install x==1", "sudo -H python3 -m pip install -r r.txt", "uv run tox", "echo pip install x", "pip install $X `y`"} {
+	for _, s := range []string{"pip install x==1", "sudo -H python3 -m pip install -r r.txt", "uv run tox", "echo pip install x", "pip install $X `y`",
+		`bash -c "pip install litellm && rm -rf /tmp/pipcache"`, "uv run --env-file .env sh -c 'pip install x'", "# pip\nfoo \"/a b/pip\" x"} {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, s string) {
+		// every tool word is read as part of a command, or skipped as a comment or echo-like argument
+		text := continuation.Replace(s)
+		_, spans, skipped := pyScan(text)
+		for _, w := range pyWords(text) {
+			if !slices.Contains(skipped, w[0]) && !slices.ContainsFunc(spans, func(sp [2]int) bool { return sp[0] <= w[0] && w[0] < max(sp[1], sp[0]+1) }) {
+				t.Fatalf("tool word at %d left uncovered in %q (spans %v)", w[0], text, spans)
+			}
+		}
 		for _, in := range PyInstalls(s) {
 			for _, p := range in.Pkgs {
 				if p != pep.Name(p) {

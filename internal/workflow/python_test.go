@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -100,6 +101,34 @@ func TestPyInstalls(t *testing.T) {
 		"pip install < reqs.txt":     {{tool: "pip install"}},
 		"pip list\npip --version\npython x.py\nuv --version\npoetry config virtualenvs.create false": nil,
 		"echo pip install x": nil, // quoted-free echo argument is not a command word
+		// N1: a quoted path or a neighbour never hides the tool word
+		`bash -c "pip install litellm && rm -rf /tmp/pipcache"`:                   {{tool: "pip install", pkgs: []string{"litellm"}}},
+		`sh -c "pip install litellm --cache-dir /tmp/pipcache"`:                   {{tool: "pip install", pkgs: []string{"litellm"}}},
+		`docker run img sh -c "pip install litellm; cp a /srv/pyx"`:               {{tool: "pip (unrecognised position)", opaque: true}},
+		`echo "pip install x"; bash -c "pip install y && ls /opt/python3-venv"`:   {{tool: "pip install", pkgs: []string{"y"}}},
+		`git commit -m "bump pip"`:                                                {{tool: "pip (unrecognised position)", opaque: true}},
+		"cd python/ && git diff --exit-code uv.lock poetry.lock && pip install .": {{tool: "pip install"}},
+		// N2: known value flags of uv run; an unknown flag value leaves the inner word unrecognised
+		"uv run --env-file .env pip install x": {{tool: "pip install", pkgs: []string{"x"}}},
+		"uv run --package p pip install x":     {{tool: "pip install", pkgs: []string{"x"}}},
+		"uv --directory app run pip install x": {{tool: "pip install", pkgs: []string{"x"}}},
+		"uv run --python python3.12 pytest":    nil,
+		"uv run --mystery v pip install x":     {{tool: "pip (unrecognised position)", opaque: true}},
+		// N3: uv run and poetry run are wrappers: the inner command is classified at its own start
+		"uv run sh -c 'pip install x'":     {{tool: "pip install", pkgs: []string{"x"}}},
+		"uv run bash -c 'pip install x'":   {{tool: "pip install", pkgs: []string{"x"}}},
+		"uv run sudo pip install x":        {{tool: "pip install", pkgs: []string{"x"}}},
+		"uv run env A=1 pip install x":     {{tool: "pip install", pkgs: []string{"x"}}},
+		"poetry run sh -c 'pip install x'": {{tool: "pip install", pkgs: []string{"x"}}},
+		"uv run poetry run pip install x":  {{tool: "pip install", pkgs: []string{"x"}}},
+		"python -m uv run pip install x":   {{tool: "pip install", pkgs: []string{"x"}}},
+		"uv run echo pip install x":        nil,
+		"uv run --with rich pip install x": {{tool: "uv run", opaque: true}, {tool: "pip install", pkgs: []string{"x"}}},
+		// N4: the inner command's arguments are not uv run flags
+		"uv run pip install -q x":           {{tool: "pip install", pkgs: []string{"x"}}},
+		"uv run pytest -q":                  nil,
+		"uv run pytest --isolated --with x": nil,
+		"uv --quiet run pytest":             {{tool: "uv run", opaque: true}},
 	} {
 		got := PyInstalls(script)
 		if len(got) != len(w) {
@@ -174,5 +203,26 @@ func TestParseShells(t *testing.T) {
 	}
 	if got := w.Jobs["a"].Shells; !slices.Equal(got, []string{"bash", "pwsh", "python {0}"}) {
 		t.Errorf("Shells = %q", got)
+	}
+}
+
+func TestPyInstallsTooManyWords(t *testing.T) {
+	got := PyInstalls(strings.Repeat("echo pip\n", maxMatches) + "pip install x")
+	if len(got) != 1 || !got[0].Opaque {
+		t.Errorf("got %+v", got)
+	}
+}
+
+func TestHasPyToolOccurrence(t *testing.T) {
+	for _, s := range []string{`bash -c "pip install litellm && rm -rf /tmp/pipcache"`, `sh -c "pip install x --cache-dir /tmp/pipcache"`,
+		`x="/opt/py/bin/pip"`, "PIP.EXE", "python3.12", `"$VENV/bin/python"`} {
+		if !HasPyTool(s) {
+			t.Errorf("%q: HasPyTool=false", s)
+		}
+	}
+	for _, s := range []string{"pipcache", "pip_x", "x-pip", "a.pip", "uv.lock", "python/", "pyproject.toml", "UV_CACHE_DIR"} {
+		if HasPyTool(s) {
+			t.Errorf("%q: HasPyTool=true", s)
+		}
 	}
 }
