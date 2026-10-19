@@ -129,6 +129,26 @@ func TestPyInstalls(t *testing.T) {
 		"uv run pytest -q":                  nil,
 		"uv run pytest --isolated --with x": nil,
 		"uv --quiet run pytest":             {{tool: "uv run", opaque: true}},
+		// R5-A: ABI-suffixed interpreters and Windows shims
+		"python3.13t setup.py install":    {{tool: "python setup.py install", opaque: true}},
+		"python3.7m -m pip install x":     {{tool: "pip install", pkgs: []string{"x"}}},
+		"python3.13d -m pip install x":    {{tool: "pip install", pkgs: []string{"x"}}},
+		"python3-dbg -m pip install x":    {{tool: "pip install", pkgs: []string{"x"}}},
+		"python3.12-dbg -m pip install x": {{tool: "pip install", pkgs: []string{"x"}}},
+		"pip.bat install litellm":         {{tool: "pip install", pkgs: []string{"litellm"}}},
+		"pip.cmd install x":               {{tool: "pip install", pkgs: []string{"x"}}},
+		"python.bat -m pip install x":     {{tool: "pip install", pkgs: []string{"x"}}},
+		"PIP.PS1 install x":               {{tool: "pip install", pkgs: []string{"x"}}},
+		"call conda.bat install numpy":    {{tool: "conda (unrecognised position)", opaque: true}},
+		// R5-B: variable names and arguments of argument-only commands are not commands
+		"export PY=${{ matrix.python-version }}": nil,
+		"cd python && make":                      nil,
+		"mkdir -p ~/.cache/pip\nls ~/.cache/pip": nil,
+		"rm -rf .tox; cp a pip; mv pip b; touch pip; chmod +x pip; chown u pip; test -f pip; [ -x pip ]; ln -s a pip; basename pip; dirname pip; realpath pip": nil,
+		"cd $(python -c 'import x')":    {{tool: "python -c", opaque: true}},
+		"export PIP=pip":                {{tool: "pip (unrecognised position)", opaque: true}},
+		"codecov -F python":             {{tool: "python (unrecognised position)", opaque: true}},
+		"pip install x # pip install y": {{tool: "pip install", pkgs: []string{"x"}}},
 	} {
 		got := PyInstalls(script)
 		if len(got) != len(w) {
@@ -215,14 +235,23 @@ func TestPyInstallsTooManyWords(t *testing.T) {
 
 func TestHasPyToolOccurrence(t *testing.T) {
 	for _, s := range []string{`bash -c "pip install litellm && rm -rf /tmp/pipcache"`, `sh -c "pip install x --cache-dir /tmp/pipcache"`,
-		`x="/opt/py/bin/pip"`, "PIP.EXE", "python3.12", `"$VENV/bin/python"`} {
+		`x="/opt/py/bin/pip"`, "PIP.EXE", "python3.12", `"$VENV/bin/python"`, "python3.13t", "python3-dbg", "pip.bat", "conda.BAT", "pip.cmd", "x=pip"} {
 		if !HasPyTool(s) {
 			t.Errorf("%q: HasPyTool=false", s)
 		}
 	}
-	for _, s := range []string{"pipcache", "pip_x", "x-pip", "a.pip", "uv.lock", "python/", "pyproject.toml", "UV_CACHE_DIR"} {
+	for _, s := range []string{"pipcache", "pip_x", "x-pip", "a.pip", "uv.lock", "python/", "pyproject.toml", "UV_CACHE_DIR", "PYTHON=3", "pip.batch"} {
 		if HasPyTool(s) {
 			t.Errorf("%q: HasPyTool=true", s)
 		}
+	}
+}
+
+func TestPyInstallsCmdQuote(t *testing.T) {
+	if got := PyInstalls("bash -c 'pip install x'"); len(got) != 1 || got[0].Cmd != "pip install x" {
+		t.Errorf("got %+v", got)
+	}
+	if got := PyInstalls(`"$VENV/bin/python" -m pip install x`); len(got) != 1 || got[0].Cmd != `"$VENV/bin/python" -m pip install x` {
+		t.Errorf("got %+v", got)
 	}
 }
