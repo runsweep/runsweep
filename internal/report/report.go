@@ -102,13 +102,13 @@ var Version = "dev"
 func Markdown(w io.Writer, inc *incident.Incident, r *model.Result) error {
 	var b strings.Builder
 	full := !r.Incomplete || len(r.Findings) > 0 // an empty list would read as "all clear"
-	b.WriteString("## runsweep · " + code(inc.ID) + "\n\n")
+	b.WriteString("## runsweep · " + codeText(inc.ID) + "\n\n")
 	b.WriteString(mdVerdict(r))
 	if full {
 		b.WriteString(mdCounts(r))
 	}
 	fmt.Fprintf(&b, "**Incident** %s  \n**Window** %s → %s UTC  \n**Scanned** %s · %s · %s\n",
-		code(inc.Title), r.Start.UTC().Format("2006-01-02 15:04"), r.End.UTC().Format("2006-01-02 15:04"),
+		codeText(inc.Title), r.Start.UTC().Format("2006-01-02 15:04"), r.End.UTC().Format("2006-01-02 15:04"),
 		count(r.ReposTargeted-len(r.Skipped), "repo"), count(r.RunsScanned, "run"), count(r.JobsScanned, "job"))
 	if r.RetentionWarning {
 		b.WriteString("\n**Warning** " + RetentionNote + ".\n")
@@ -120,14 +120,14 @@ func Markdown(w io.Writer, inc *incident.Incident, r *model.Result) error {
 	if len(r.Skipped) > 0 {
 		b.WriteString("### Skipped repositories\n\n")
 		for _, s := range r.Skipped {
-			fmt.Fprintf(&b, "- %s — %s\n", code(s.Repo), code(s.Reason))
+			fmt.Fprintf(&b, "- %s — %s\n", codeText(s.Repo), codeText(s.Reason))
 		}
 		b.WriteString("\nThe token needs read access to Actions, Contents and Metadata for these repositories.\n\n")
 	}
 	if len(inc.Refs) > 0 {
 		b.WriteString("### Incident sources\n\n")
 		for _, ref := range inc.Refs {
-			fmt.Fprintf(&b, "- %s\n", code(ref))
+			fmt.Fprintf(&b, "- %s\n", codeText(ref))
 		}
 		b.WriteString("\n")
 	}
@@ -251,7 +251,7 @@ func mdFindings(b *strings.Builder, r *model.Result) {
 		}
 	}
 	b.WriteString("### Rotate first\n\n")
-	nothing := nothingToRotate(r, "", "\n\n", code)
+	nothing := nothingToRotate(r, "", "\n\n", codeText)
 	if len(confirmed) > 0 {
 		mdItems(b, confirmed, "🛑")
 	} else {
