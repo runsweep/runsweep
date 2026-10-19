@@ -28,6 +28,12 @@ body:
       description: One `name@version` per line, or OSV ids (MAL-…, GHSA-…).
       render: text
   - type: textarea
+    id: pypi
+    attributes:
+      label: PyPI packages and versions
+      description: "PyPI packages and versions, one per line: name==version"
+      render: text
+  - type: textarea
     id: actions
     attributes:
       label: GitHub Actions and commit SHAs

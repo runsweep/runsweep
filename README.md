@@ -78,6 +78,8 @@ title: "axios 1.14.1 / 0.30.4 malicious release"
 window: {start: 2026-03-31T00:21:58Z, end: 2026-03-31T03:15:30Z}
 npm:                       # compromised package versions
   - {name: axios, versions: ["1.14.1", "0.30.4"]}  # ["*"] alone: every version is malicious
+pypi:                      # names and versions are matched after PEP 503 / PEP 440 normalization
+  - {name: litellm, versions: ["1.82.7", "1.82.8"]}
 actions:                   # compromised action commits (40-char SHAs)
   - {uses: tj-actions/changed-files, shas: ["0e58ed8671d6b60d0890c21b07f8835ace038e67"]}
 iocs:                      # informational, not matched
@@ -87,7 +89,7 @@ refs:
   - https://osv.dev/vulnerability/MAL-2026-2307
 ```
 
-`id`, `window` and at least one of `npm` / `actions` are required. Unknown fields are errors.
+`id`, `window` and at least one of `npm` / `pypi` / `actions` are required. Unknown fields are errors.
 
 ## Built-in incidents
 
@@ -106,13 +108,14 @@ refs:
 ```bash
 runsweep incidents import MAL-2026-2307 GHSA-g7cv-rxg3-hmpx -o incident.yaml   # OSV ids (MAL-, GHSA-, CVE-)
 runsweep incidents import --package npm:axios                                   # every MAL-* record for a package
+runsweep incidents import --package pypi:litellm --since 2026-03-24T10:39:00Z --until 2026-03-24T16:00:00Z
 grep -o 'MAL-[0-9]*-[0-9]*' advisory.txt | runsweep incidents import            # ids on stdin, one per line
 runsweep incidents import --action owner/repo@<40-hex sha> --since 2026-03-19T17:43:00Z --until 2026-03-20T06:00:00Z
 ```
 
 It takes the npm versions OSV lists (an OSV range — with no versions listed, or with no fix — is expanded to the registry versions inside it; if none are, the package gets `["*"]`, every version), looks up their publish times in the npm registry and derives the window: the start is the earliest publish, the end is when the registry shows the versions removed, or now if any is still published. Packages are grouped by when their bad versions were first published; groups separated by more than 7 days are treated as separate waves. The largest group (the latest on a tie) and everything after it are kept, earlier groups are dropped as unrelated and listed in a comment (`--keep-all` keeps everything). A package is never split. Every assumption is written as a comment in the file; check them, and override the window with `--since` / `--until` when a source gives better times.
 
-Ids on stdin are read only when no ids, `--package` or `--action` are given (at most 10 000). An import that has only `--action` needs `--since` and `--until`. GitHub Actions advisories are reported on stderr: OSV has no commit SHAs, so pass them with `--action`. The output is validated before it is written; `-o` replaces the file atomically. Only `api.osv.dev` and `registry.npmjs.org` are contacted. Any error, including an unknown subcommand, exits with `2`.
+PyPI does not keep upload times of removed releases, so a PyPI import needs `--since` and `--until`. Ids on stdin are read only when no ids, `--package` or `--action` are given (at most 10 000). An import that has only `--action` needs `--since` and `--until`. GitHub Actions advisories are reported on stderr: OSV has no commit SHAs, so pass them with `--action`. The output is validated before it is written; `-o` replaces the file atomically. Only `api.osv.dev` and `registry.npmjs.org` are contacted. Any error, including an unknown subcommand, exits with `2`.
 
 ## How it decides
 
@@ -127,7 +130,7 @@ For each job that ran inside the window (including re-runs of runs created up to
 
 For AFFECTED and POSSIBLE jobs the report lists what the job could read — secrets referenced by the job, `id-token: write`, cloud roles it could assume, `GITHUB_TOKEN` permissions — and merges them into a **Rotate first** list ordered by priority (cloud roles, then publish/deploy credentials, then third-party services). Each item says whether an AFFECTED job could read it in every repository listed (`"confirmed": true` in JSON) or not: the text report marks it `AFFECTED job` or `POSSIBLE jobs only`, the Markdown report keeps confirmed items under **Rotate first** and the rest under **Also review**; within a priority confirmed items come first. The Markdown report opens with one verdict (exposed, possibly exposed, not cleared, no jobs found, or no exposure found), counts of AFFECTED, POSSIBLE, UNCHECKED and CLEAN jobs (`clean_jobs` in JSON), and groups UNCHECKED jobs by reason. The secrets of UNCHECKED jobs are listed apart, under **Not verified** (`unverified_rotation` in JSON; the Markdown report adds why each was not verified): rotate them if you cannot verify otherwise. With nothing confirmed the report says `Nothing confirmed to rotate; N secrets…` instead of `Nothing to rotate.` Jobs whose secrets are unknown (workflow file, job list or run not available) are listed as `Secrets unknown for N jobs…` (`secrets_unknown_jobs` in JSON); the report then never says `Nothing to rotate.`
 
-`pull_request_target` and `workflow_run` run the workflow from the base branch, but runsweep reads files at the run's `head_sha`: secrets and lockfile may differ from what ran, and a fork can control them. These runs are marked and at least UNCHECKED; lockfile and `uses:` evidence is capped at POSSIBLE; a bad action download in the log is still AFFECTED.
+`pull_request_target` and `workflow_run` run the workflow from the base branch, but runsweep reads files at the run's `head_sha`: secrets and lockfile may differ from what ran, and a fork can control them. These runs are marked and at least UNCHECKED; lockfile and `uses:` evidence is capped at POSSIBLE; a bad action download in the log is still AFFECTED. PyPI evidence other than a job log line is at most POSSIBLE.
 
 ## Limits
 
@@ -151,7 +154,11 @@ For AFFECTED and POSSIBLE jobs the report lists what the job could read — secr
 - Called workflows are read when local or pinned to a commit SHA, and in the scanned repository's owner or a public repository; others are judged from the caller job. A call into another owner's private repository is not read; the job is at least UNCHECKED.
 - Workflow files over 1 MiB, lockfiles or `package.json` over 32 MB, and lockfiles and `package.json` files past the first 500 of a commit are not read; the job is at least UNCHECKED.
 - Lateral movement is not traced: malicious code can spread through caches, artifacts and `needs` outputs, `repository_dispatch` / `workflow_run` chains, and self-hosted runners (`runs-on` is not read). `node_modules` restored from a cache or artifact is not seen either, so a job that only runs tests can still have run bad code.
-- Runs that start after the window end are not scanned.
+- PyPI: requirements and constraints files (== pins), `uv.lock`, `poetry.lock`, `pylock.toml` and `Pipfile.lock` are read; `pdm.lock` is not. Files included with `-r` or `-c` are read only when their name looks like a requirements or constraints file.
+- PyPI installs are proven by pip, uv, poetry and pipx lines in the job log. A step whose output does not list every installed version (quiet or redirected output, `uv run`, build dependencies, a restored venv), wrappers (tox, nox, pre-commit, hatch, pdm, pipenv, pipx, uvx, conda, `python -m build`, `pip wheel` or `pip download`) and Python commands runsweep cannot classify (`python script.py`, tool words inside other commands) make the job UNCHECKED, or POSSIBLE when a lockfile anywhere in the repository pins a bad version; lockfiles are not linked to jobs.
+- A venv or site-packages restored from a cache shows only through "Requirement already satisfied" lines; a uv or poetry environment restored from a cache lists only what changed. Installs inside `docker build`, containers and scripts that silence all output are not seen. Build tools that call pip internally without a Python tool word in the job (`sam build`) and scripts that install silently, with no install output and no Python tool word in the step, are not seen.
+- PyPI version ranges (`>=1,<2`) are not compared.
+- - Runs that start after the window end are not scanned.
 - GitHub Enterprise (GHES, GHE.com) is not supported.
 - A large organization takes hours under the 5000 requests/hour rate limit: scan with `--repo`, or narrow the window with `--since` / `--until`.
 - OIDC `id-token` access in nested reusable workflows is not resolved; cloud roles reached only that way may be missing from the list.

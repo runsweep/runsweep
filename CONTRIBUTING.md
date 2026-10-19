@@ -11,11 +11,13 @@ A preset is one YAML file in [`internal/incident/presets/`](internal/incident/pr
    ```bash
    runsweep incidents import MAL-2026-2307 GHSA-g7cv-rxg3-hmpx -o internal/incident/presets/<id>.yaml
    runsweep incidents import --package npm:axios                       # every MAL-* record OSV has for a package
+   runsweep incidents import --package pypi:litellm --since … --until …  # PyPI: the window is required
    runsweep incidents import --action owner/repo@<40-hex sha> \
      --since 2026-03-19T17:43:00Z --until 2026-03-20T06:00:00Z           # compromised action commits
    ```
 
    Read the warnings and the comments in the output. Packages are grouped by when their bad versions were first published; groups more than 7 days before the main wave are dropped and listed in a comment (`--keep-all` keeps them). GitHub Actions advisories carry no commit SHAs and need `--action`, which also needs `--since` and `--until`. `versions: ["*"]` (only element) means every version is malicious; `import` writes it when an OSV range cannot be filled from the registry (package gone, or no registry version in the range).
+   PyPI packages go under `pypi:`; PyPI keeps no upload times of removed releases, so the window comes from write-ups, not from the registry.
 2. Check every package version and every commit SHA against at least two independent sources (OSV or a GitHub advisory, plus a vendor or maintainer write-up). Leave out what only one source lists, and say so in a comment.
 3. Check the window. `import` takes the start from npm publish times and the end from the registry, which often only gives an upper bound (`time.modified`). Replace it with `--since` / `--until` when a source gives better times, and widen rather than narrow: a missed job is worse than an extra one.
 4. Comment how the start and the end were derived, with the sources.
