@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/runsweep/runsweep/internal/model"
+	"github.com/runsweep/runsweep/internal/pep"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -55,6 +56,13 @@ type NPMPackage struct {
 	Versions []string `yaml:"versions" json:"versions"`
 }
 
+// PyPIPackage is a compromised PyPI distribution. Versions ["*"] means every version. Name and
+// versions are kept as written; matching normalizes them (PEP 503, PEP 440).
+type PyPIPackage struct {
+	Name     string   `yaml:"name" json:"name"`
+	Versions []string `yaml:"versions" json:"versions"`
+}
+
 // Action is a compromised GitHub Action reference.
 type Action struct {
 	Uses string   `yaml:"uses" json:"uses"` // owner/repo
@@ -67,6 +75,7 @@ type Incident struct {
 	Title   string              `yaml:"title" json:"title"`
 	Window  Window              `yaml:"window" json:"window"`
 	NPM     []NPMPackage        `yaml:"npm" json:"npm,omitempty"`
+	PyPI    []PyPIPackage       `yaml:"pypi" json:"pypi,omitempty"`
 	Actions []Action            `yaml:"actions" json:"actions,omitempty"`
 	IOCs    map[string][]string `yaml:"iocs" json:"iocs,omitempty"`
 	Refs    []string            `yaml:"refs" json:"refs"`
@@ -95,8 +104,8 @@ func (i *Incident) Validate() error {
 	if i.Window.Start.IsZero() || i.Window.End.IsZero() || !i.Window.Start.Before(i.Window.End) {
 		errs = append(errs, errors.New("window: start and end are required and start must be before end"))
 	}
-	if len(i.NPM) == 0 && len(i.Actions) == 0 {
-		errs = append(errs, errors.New("at least one of npm or actions is required"))
+	if len(i.NPM) == 0 && len(i.PyPI) == 0 && len(i.Actions) == 0 {
+		errs = append(errs, errors.New("at least one of npm, pypi or actions is required"))
 	}
 	for _, p := range i.NPM {
 		if p.Name == "" || len(p.Versions) == 0 {
@@ -104,6 +113,19 @@ func (i *Incident) Validate() error {
 		}
 		if len(p.Versions) > 1 && slices.Contains(p.Versions, "*") {
 			errs = append(errs, fmt.Errorf("npm %q: \"*\" (any version) must be the only version", p.Name))
+		}
+	}
+	for _, p := range i.PyPI {
+		if !pep.ValidName(p.Name) || len(p.Versions) == 0 {
+			errs = append(errs, fmt.Errorf("pypi %q: a valid name and versions are required", p.Name))
+		}
+		if len(p.Versions) > 1 && slices.Contains(p.Versions, "*") {
+			errs = append(errs, fmt.Errorf("pypi %q: \"*\" (any version) must be the only version", p.Name))
+		}
+		for _, v := range p.Versions {
+			if _, ok := pep.ParseVersion(v); v != "*" && !ok {
+				errs = append(errs, fmt.Errorf("pypi %q: invalid version %q", p.Name, v))
+			}
 		}
 	}
 	for _, a := range i.Actions {
