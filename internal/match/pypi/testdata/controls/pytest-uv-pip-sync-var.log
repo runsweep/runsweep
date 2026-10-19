@@ -1,0 +1,62 @@
+2026-08-01T20:24:40.6225329Z ##[group]Run unset UV_SYSTEM_PYTHON
+2026-08-01T20:24:40.6225643Z [36;1munset UV_SYSTEM_PYTHON[0m
+2026-08-01T20:24:40.6226009Z [36;1munset UV_PYTHON[0m
+2026-08-01T20:24:40.6226387Z [36;1m[0m
+2026-08-01T20:24:40.6226691Z [36;1muv pip sync \[0m
+2026-08-01T20:24:40.6226974Z [36;1m  ${GITHUB_ACTION_PATH}/requirements/tools.txt[0m
+2026-08-01T20:24:40.6269787Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-08-01T20:24:40.6270128Z env:
+2026-08-01T20:24:40.6270332Z   PYTEST_ADDOPTS: --color=yes
+2026-08-01T20:24:40.6270593Z   UV_CACHE_DIR: /tmp/baipp-uv_cache_dir
+2026-08-01T20:24:40.6270982Z   REQS_HASH: 567a34dc4c0412a37952d1396403566f0d030748c60574977cdf16bcfdbca5da
+2026-08-01T20:24:40.6271647Z   VIRTUAL_ENV: /tmp/baipp
+2026-08-01T20:24:40.6271884Z ##[endgroup]
+2026-08-01T20:24:40.7131796Z Using Python 3.14.6 environment at: /tmp/baipp
+2026-08-01T20:24:40.9854868Z Resolved 37 packages in 271ms
+2026-08-01T20:24:41.0307550Z Downloading cryptography (4.5MiB)
+2026-08-01T20:24:41.0324774Z Downloading pygments (1.2MiB)
+2026-08-01T20:24:41.0332669Z Downloading pydantic-core (2.0MiB)
+2026-08-01T20:24:41.1539258Z  Downloaded pydantic-core
+2026-08-01T20:24:41.2150980Z  Downloaded cryptography
+2026-08-01T20:24:41.2422227Z  Downloaded pygments
+2026-08-01T20:24:41.2424771Z Prepared 37 packages in 256ms
+2026-08-01T20:24:41.2704583Z Installed 37 packages in 27ms
+2026-08-01T20:24:41.2705098Z  + annotated-types==0.7.0
+2026-08-01T20:24:41.2705531Z  + attrs==26.1.0
+2026-08-01T20:24:41.2705890Z  + certifi==2026.4.22
+2026-08-01T20:24:41.2706263Z  + cffi==2.0.0
+2026-08-01T20:24:41.2706637Z  + charset-normalizer==3.4.7
+2026-08-01T20:24:41.2707096Z  + check-wheel-contents==0.6.3
+2026-08-01T20:24:41.2707672Z  + click==8.3.3
+2026-08-01T20:24:41.2708058Z  + cryptography==47.0.0
+2026-08-01T20:24:41.2708444Z  + docutils==0.22.4
+2026-08-01T20:24:41.2708794Z  + id==1.6.1
+2026-08-01T20:24:41.2709130Z  + idna==3.13
+2026-08-01T20:24:41.2709614Z  + jaraco-classes==3.4.0
+2026-08-01T20:24:41.2710094Z  + jaraco-context==6.1.2
+2026-08-01T20:24:41.2710669Z  + jaraco-functools==4.4.0
+2026-08-01T20:24:41.2711691Z  + jeepney==0.9.0
+2026-08-01T20:24:41.2712113Z  + keyring==25.7.0
+2026-08-01T20:24:41.2712530Z  + markdown-it-py==4.0.0
+2026-08-01T20:24:41.2712959Z  + mdurl==0.1.2
+2026-08-01T20:24:41.2713370Z  + more-itertools==11.0.2
+2026-08-01T20:24:41.2713851Z  + nh3==0.3.5
+2026-08-01T20:24:41.2714226Z  + packaging==26.2
+2026-08-01T20:24:41.2714702Z  + pycparser==3.0
+2026-08-01T20:24:41.2715300Z  + pydantic==2.13.3
+2026-08-01T20:24:41.2715873Z  + pydantic-core==2.46.3
+2026-08-01T20:24:41.2716315Z  + pygments==2.20.0
+2026-08-01T20:24:41.2716798Z  + readme-renderer==44.0
+2026-08-01T20:24:41.2717251Z  + requests==2.33.1
+2026-08-01T20:24:41.2717772Z  + requests-toolbelt==1.0.0
+2026-08-01T20:24:41.2718219Z  + rfc3986==2.0.0
+2026-08-01T20:24:41.2718831Z  + rich==15.0.0
+2026-08-01T20:24:41.2719431Z  + secretstorage==3.5.0
+2026-08-01T20:24:41.2719897Z  + twine==6.2.0
+2026-08-01T20:24:41.2720392Z  + typing-extensions==4.15.0
+2026-08-01T20:24:41.2721133Z  + typing-inspection==0.4.2
+2026-08-01T20:24:41.2721740Z  + urllib3==2.6.3
+2026-08-01T20:24:41.2742645Z  + wheel==0.47.0
+2026-08-01T20:24:41.2750747Z  + wheel-filename==1.4.2
+2026-08-01T20:24:41.2789602Z ##[end-action id=__hynek_build-and-inspect-python-package.__run_4;outcome=success;conclusion=success;duration_ms=660]
+2026-08-01T20:24:41.2793732Z ##[start-action display=Artifact Name;id=__hynek_build-and-inspect-python-package.artifact]
