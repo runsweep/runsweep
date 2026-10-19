@@ -1198,6 +1198,23 @@ func TestScanNoLockfileBuildTool(t *testing.T) {
 			t.Errorf("%s: %+v", name, fd)
 		}
 	}
+	// an unidentified job is judged by every job; a lockfile that cannot be read is none; a
+	// directory named only in the log links it
+	unknown := fx(cargo, "package.json", other)
+	unknown.Jobs[1][0].Name = "unknown"
+	corrupt := fx(cargo, "package.json", other)
+	corrupt.AddFile("o/a", "s1", "package-lock.json", []byte("{"))
+	bun := fx(cargo, "package.json", other)
+	bun.AddFile("o/a", "s1", "bun.lockb", []byte("x"))
+	inLog := fx(cargo, "bindings/node/package.json", other)
+	inLog.Logs[10] += "2026-03-31T01:00:00Z   working-directory: bindings/node\n"
+	base := fx(cargo, "package.json", other)
+	base.Runs["o/a"][0].Event = "pull_request_target"
+	for name, f := range map[string]*sourcetest.Fake{"unidentified": unknown, "corrupt lockfile": corrupt, "bun.lockb": bun, "dir in log": inLog, "base event": base} {
+		if fd := scanOne(t, f, npmOnly); fd.Status != model.Unchecked || !hasNote(fd, "job runs a build tool that may install silently") {
+			t.Errorf("%s: %+v", name, fd)
+		}
+	}
 	// a bad direct dependency in the root stays POSSIBLE
 	if fd := scanOne(t, fx(cargo, "package.json", `{"dependencies":{"axios":"^1.14.0"}}`), npmOnly); fd.Status != model.Possible {
 		t.Errorf("direct dep: %+v", fd)
