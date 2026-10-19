@@ -10,7 +10,7 @@ import (
 
 // pyToolRe finds a Python tool word, case-insensitively. Group 1 is what precedes the word in the
 // same command word: a quote and/or a path (.venv/bin/, "$VENV/bin/, "/my dir/); group 2 is the tool.
-var pyToolRe = regexp.MustCompile(`(?i)(?:^|[^\w./-])("[^"\n]*/|'[^'\n]*/|["']?(?:[^\s;&|()'"` + "`" + `]*/)?)(pip-sync|pip-compile|pre-commit|python[\d.]*|pypy[\d.]*|pip[\d.]*|pipx|pipenv|py|uvx|uv|poetry|pdm|hatch|tox|nox|conda|mamba|micromamba|pixi|rye|flit|maturin|cibuildwheel)(?:\.exe)?["']?(?:$|[ \t;&|)\n])`)
+var pyToolRe = regexp.MustCompile(`(?i)(?:^|[^\w./-])("[^"\n]*/|'[^'\n]*/|["']?(?:[^\s;&|()'"` + "`" + `]*/)?)(pip-sync|pip-compile|pre-commit|cibuildwheel|micromamba|pipenv|python(?:\d+(?:\.\d+)*)?|pypy(?:\d+(?:\.\d+)*)?|pipx|pip(?:\d+(?:\.\d+)*)?|poetry|pixi|py|uvx|uv|pdm|hatch|tox|nox|conda|mamba|rye|flit|maturin)(?:\.exe)?["']?`)
 
 const (
 	pyAssign = `[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|\S*)`
@@ -37,7 +37,21 @@ var pyNoCmd = map[string]bool{"echo": true, "printf": true, "print": true, "cat"
 var pyLeadWord = map[string]bool{"if": true, "elif": true, "while": true, "until": true, "then": true, "do": true, "else": true, "!": true}
 
 // HasPyTool reports whether text mentions a Python tool as a word.
-func HasPyTool(text string) bool { return pyToolRe.MatchString(text) }
+func HasPyTool(text string) bool { return len(pyToolMatches(text, 1)) > 0 }
+
+// pyToolMatches finds the tool words that end a word (the regexp does not consume what follows, so
+// the next line's first word is not skipped). n caps the matches read.
+func pyToolMatches(text string, n int) [][]int {
+	var out [][]int
+	for _, m := range pyToolRe.FindAllStringSubmatchIndex(text, maxMatches) {
+		if m[1] == len(text) || strings.IndexByte(" \t;&|)\n", text[m[1]]) >= 0 {
+			if out = append(out, m); len(out) == n {
+				break
+			}
+		}
+	}
+	return out
+}
 
 // PyInstall is a Python command that installs packages, or an opaque one that installs or runs
 // sdist code without listing versions.
@@ -78,7 +92,7 @@ func PyInstalls(text string) []PyInstall {
 	text = continuation.Replace(text)
 	var out []PyInstall
 	inside := 0 // end of the last Python command: its inner words are not commands of their own
-	for _, m := range pyToolRe.FindAllStringSubmatchIndex(text, maxMatches) {
+	for _, m := range pyToolMatches(text, maxMatches) {
 		toolStart, toolEnd := m[4], m[5]
 		if toolStart < inside {
 			continue
@@ -221,7 +235,17 @@ func classify(tool string, args []string) (PyInstall, bool) {
 			return in, true
 		case s == "pip" || s == "tool":
 			return PyInstall{Tool: "uv " + s + " " + sub(1), Opaque: true}, true
-		default: // run, lock, build and anything unknown
+		case s == "run":
+			rest := runCommand(afterFirstPositional(args))
+			for _, a := range args {
+				name, _, _ := strings.Cut(a, "=")
+				if slices.Contains([]string{"--with", "--with-requirements", "--with-editable", "--isolated", "-q", "--quiet", "--script"}, name) ||
+					name == "--no-project" && len(rest) > 0 && strings.HasSuffix(rest[0], ".py") {
+					return PyInstall{Tool: "uv run", Opaque: true}, true
+				}
+			}
+			return classifyInner(rest) // uv's own output shows what it syncs
+		default: // lock, build and anything unknown
 			return PyInstall{Tool: "uv " + s, Opaque: true}, true
 		}
 	case tool == "poetry":
@@ -230,8 +254,8 @@ func classify(tool string, args []string) (PyInstall, bool) {
 			return PyInstall{}, false
 		case s == "install" || s == "sync" || s == "update":
 			return PyInstall{Tool: "poetry " + s}, true
-		case s == "run": // runs any command, pip among them
-			return PyInstall{Tool: "poetry run", Opaque: true}, true
+		case s == "run":
+			return classifyInner(runCommand(afterFirstPositional(args)))
 		case s == "add":
 			in := PyInstall{Tool: "poetry add"}
 			in.Pkgs, in.Dynamic = pyPkgs(pos[1:])
@@ -272,6 +296,47 @@ var pyInterpOpaque = map[string]bool{"tox": true, "nox": true, "pre_commit": tru
 // setupPyCmds are the setup.py commands that build or install.
 var setupPyCmds = map[string]bool{"install": true, "develop": true, "bdist_wheel": true, "build": true, "sdist": true,
 	"egg_info": true, "bdist_egg": true, "easy_install": true}
+
+// afterFirstPositional returns the arguments after the first one that is neither a flag nor a flag
+// value, and runCommand the arguments from that first one on: for `uv run [flags] cmd args` the
+// command and its arguments.
+func afterFirstPositional(args []string) []string {
+	if c := runCommand(args); len(c) > 0 {
+		return c[1:]
+	}
+	return nil
+}
+
+func runCommand(args []string) []string {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case redirectRe.MatchString(a):
+			if redirectOp.MatchString(a) {
+				i++
+			}
+		case strings.HasPrefix(a, "-"):
+			if pyValueFlags[a] && !strings.Contains(a, "=") {
+				i++
+			}
+		default:
+			return args[i:]
+		}
+	}
+	return nil
+}
+
+// classifyInner classifies the command run by `poetry run` and `uv run`, which install nothing themselves.
+func classifyInner(cmd []string) (PyInstall, bool) {
+	if len(cmd) == 0 {
+		return PyInstall{}, false
+	}
+	tool := strings.ToLower(cmd[0])
+	if i := strings.LastIndexAny(tool, `/\`); i >= 0 {
+		tool = tool[i+1:]
+	}
+	return classify(strings.TrimSuffix(tool, ".exe"), cmd[1:])
+}
 
 // classifyInterpreter reads `python [flags] -m MODULE args` and `python setup.py CMD`.
 func classifyInterpreter(args []string) (PyInstall, bool) {
@@ -345,7 +410,7 @@ func baseAction(u string) bool {
 // HasPython is false only when nothing in the job can install a Python package: no Python tool or
 // build tool word, no opaque script, and only base actions. Such a job is CLEAN for PyPI without its log.
 func (j *Job) HasPython() bool {
-	if slices.ContainsFunc(slices.Concat(j.Runs, j.Scripts), func(s string) bool { return pyToolRe.MatchString(s) || buildRe.MatchString(s) }) {
+	if slices.ContainsFunc(slices.Concat(j.Runs, j.Scripts), func(s string) bool { return HasPyTool(s) || buildRe.MatchString(s) }) {
 		return true
 	}
 	return j.RunsOpaque() || slices.ContainsFunc(j.Runs, pathCmdRe.MatchString) ||
