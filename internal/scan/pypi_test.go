@@ -62,7 +62,7 @@ func TestScanPyPI(t *testing.T) {
 		"rule 7 quiet pinned":       {pyFx("      - run: pip install -q -r requirements.txt\n", pyStep("pip install -q -r requirements.txt"), pinned...), model.Possible, "lockfile pins litellm==1.82.8: requirements.txt"},
 		"rule 7 tox pinned":         {pyFx("      - run: tox\n", pyStep("tox", "py: install_deps> python -I -m pip install"), pinned...), model.Possible, "Python install output not visible: tox"},
 		"rule 8 quiet":              {pyFx("      - run: pip install -q -r requirements.txt\n", pyStep("pip install -q -r requirements.txt")), model.Unchecked, "Python install output incomplete in step: pip install -q -r requirements.txt"},
-		"rule 8 uv run":             {pyFx("      - run: uv run pytest\n", pyStep("uv run pytest", "Installed 23 packages in 10ms")), model.Unchecked, "Python install output not visible: uv run"},
+		"rule 8 uv run":             {pyFx("      - run: uv run pytest\n", pyStep("uv run pytest", "Installed 23 packages in 10ms")), model.Unchecked, "Python install output incomplete in step: uv run pytest"},
 		"rule 8 third-party action": {pyFx("      - uses: snok/install-poetry@v1\n      - run: poetry install\n", pyStep("snok/install-poetry@v1")+pyStep("poetry install", "Package operations: 1 install, 0 updates, 0 removals", "  - Installing six (1.17.0)")), model.Unchecked, "action snok/install-poetry@v1 may install Python packages"},
 		"rule 8 pdm":                {pyFx("      - run: pip install -q .\n", pyStep("pip install -q ."), "pdm.lock", "x"), model.Unchecked, "Python install output incomplete in step"},
 		"composite nested quiet":    {pyFx("      - uses: ./.github/actions/setup\n", pyStep("./.github/actions/setup")+pyStep("pip install -q -r r.txt")), model.Unchecked, ""},
