@@ -482,10 +482,10 @@ func (s *scanner) scanRun(ctx context.Context, repo string, run source.Run) ([]m
 			npmJob.Status = model.Possible
 			npmJob.Evidence = append(npmJob.Evidence, note("lockfile read at head_sha; the run used the base branch"))
 		}
-		// A package.json with no lockfile in the root or a directory the job names: a build tool may
+		// A package.json with no lockfile in the root or a directory the job's steps name: a build tool may
 		// install from it silently, so a quiet job (any job when unidentified) with one is never CLEAN.
 		if !keepUnchecked && quiet && npmJob.Status > model.Clean && rj != nil && rj.RunsBuildTool() && slices.ContainsFunc(npmJob.NoLock, func(dir string) bool {
-			return dir == "." || rj.Mentions(dir) || pathInLog(log, dir)
+			return dir == "." || rj.Mentions(dir) // not the log: cargo lists every workspace crate's path
 		}) {
 			keepUnchecked = true
 			npmJob.Evidence = append(npmJob.Evidence, note("package.json without a lockfile; job runs a build tool that may install silently"))
