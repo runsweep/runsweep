@@ -1,5 +1,3 @@
-// internal/pep/pep.go
-
 // Package pep normalizes Python package names (PEP 503) and versions (PEP 440), so a name or
 // version written in a log, a lockfile and an incident compares equal however it is spelled.
 package pep
