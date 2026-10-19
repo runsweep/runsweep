@@ -42,7 +42,7 @@ func (s *scanner) pypiJob(wj, rj *workflow.Job, log string, logErr error, lock p
 	}
 	for _, in := range cmds {
 		for _, p := range in.Pkgs {
-			if s.pypiBad.Has(p) && !slices.ContainsFunc(l.Installs, func(i pypi.Install) bool { return i.Name == p }) {
+			if s.pypiBad.Has(p) && !slices.ContainsFunc(l.Installs, func(i pypi.Install) bool { return i.Name == p && completeAt(l, i.Line) }) {
 				return model.Possible, []model.Evidence{{Kind: "pypi", Detail: fmt.Sprintf("runs `%s` at run time", in.Cmd)}}
 			}
 		}
@@ -118,4 +118,18 @@ func pypiReason(read bool, py []pypi.Section, wj, rj *workflow.Job, lock pypi.Re
 		return "too many manifests — not all read"
 	}
 	return "Python installs not verified"
+}
+
+// completeAt reports whether log line n lies in a Python section whose installs printed full lists.
+func completeAt(l pypi.Log, n int) bool {
+	for i, sec := range l.Sections {
+		end := 1 << 30
+		if i+1 < len(l.Sections) {
+			end = l.Sections[i+1].Line
+		}
+		if sec.Python && sec.Complete && n >= sec.Line && n < end {
+			return true
+		}
+	}
+	return false
 }

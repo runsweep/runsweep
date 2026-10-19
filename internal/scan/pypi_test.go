@@ -55,6 +55,7 @@ func TestScanPyPI(t *testing.T) {
 		"rule 2 unparsed":           {pyFx(pip, pyStep("pip install -r requirements.txt", "Successfully installed litellm-1.82.8!!x")), model.Unchecked, "unparsed install line for"},
 		"rule 3 named":              {pyFx("      - run: pip install -q litellm\n", pyStep("pip install -q litellm")), model.Possible, "runs `pip install -q litellm` at run time"},
 		"rule 3 other version seen": {pyFx("      - run: pip install litellm\n", pyStep("pip install litellm", "Successfully installed litellm-1.82.9")), model.Clean, ""},
+		"rule 3 extra script":       {pyFx("      - run: |\n          pip install litellm && ./extra.sh\n", pyStep("pip install litellm && ./extra.sh", "Successfully installed litellm-1.82.9")), model.Possible, "runs `pip install litellm"},
 		"rule 4 dynamic":            {pyFx("      - run: pip install $PKG\n", pyStep("pip install $PKG", "Successfully installed x-1")), model.Unchecked, "package named at run time"},
 		"rule 5 quiet job":          {pyFx("      - run: make test\n", pyStep("make test", "ok"), pinned...), model.Clean, ""},
 		"rule 6 complete":           {pyFx(pip, pyStep("pip install -r requirements.txt", "Successfully installed requests-2.32.0"), pinned...), model.Clean, ""},
@@ -127,4 +128,20 @@ func scanAny(t *testing.T, f *sourcetest.Fake, i *incident.Incident) model.Findi
 		return model.Finding{Status: model.Clean}
 	}
 	return scanOne(t, f, i)
+}
+
+func TestScanPyPIEvents(t *testing.T) {
+	pip := "      - run: pip install -r requirements.txt\n"
+	clean := pyFx(pip, pyStep("pip install -r requirements.txt", "Successfully installed requests-2.32.0"))
+	clean.Runs["o/a"][0].Event = "pull_request_target"
+	if fd := scanAny(t, clean, pypiOnly); fd.Status != model.Unchecked {
+		t.Errorf("base event clean: %+v", fd)
+	}
+	// npm POSSIBLE survives a CLEAN PyPI verdict
+	mixed := *pypiOnly
+	mixed.NPM = npmOnly.NPM
+	f := pyFx("      - run: npm install "+npmOnly.NPM[0].Name+"\n", pyStep("npm install "+npmOnly.NPM[0].Name))
+	if fd := scanAny(t, f, &mixed); fd.Status < model.Possible || !hasEvidence(fd, "run time") {
+		t.Errorf("mixed npm: %+v", fd)
+	}
 }
