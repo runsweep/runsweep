@@ -15,8 +15,8 @@ import (
 	"github.com/runsweep/runsweep/internal/pep"
 )
 
-// ErrNothing means no npm version and no action was found.
-var ErrNothing = errors.New("nothing to import: no npm versions and no --action")
+// ErrNothing means no npm or PyPI version and no action was found.
+var ErrNothing = errors.New("nothing to import: no npm or PyPI versions and no --action")
 
 var noteText = strings.NewReplacer("\n", " ", "\r", " ", "\u2028", " ", "\u2029", " ")
 
@@ -102,7 +102,7 @@ func (c *Client) Import(ctx context.Context, o Options) ([]byte, error) {
 				continue
 			}
 			if f.seen[al] {
-				f.notes = append(f.notes, fmt.Sprintf("%s: no npm or GitHub Actions entries; alias %s already imported", id, al))
+				f.notes = append(f.notes, fmt.Sprintf("%s: no npm, PyPI or GitHub Actions entries; alias %s already imported", id, al))
 				useful = true
 				continue
 			}
@@ -111,10 +111,10 @@ func (c *Client) Import(ctx context.Context, o Options) ([]byte, error) {
 				return nil, err
 			}
 			useful = addID(av) || useful
-			f.notes = append(f.notes, fmt.Sprintf("%s: no npm or GitHub Actions entries; followed alias %s", id, al))
+			f.notes = append(f.notes, fmt.Sprintf("%s: no npm, PyPI or GitHub Actions entries; followed alias %s", id, al))
 		}
 		if !useful {
-			f.both("%s: no npm or GitHub Actions entries", id)
+			f.both("%s: no npm, PyPI or GitHub Actions entries", id)
 		}
 	}
 	for _, p := range o.Packages {
