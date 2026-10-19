@@ -818,7 +818,7 @@ func TestFatalScanReportsIncomplete(t *testing.T) {
 	f.NoAccess["o/a"] = true
 	out.Reset()
 	if code := run([]string{"scan", "--incident", writeInc(t, incYAML), "--repo", "o/a", "--format", "md"}, &out, &errb, fakeDeps(f)); code != 2 ||
-		!strings.Contains(out.String(), "> **Scan incomplete: no repository could be scanned") {
+		!strings.Contains(out.String(), "> **Scan incomplete: `no repository could be scanned") {
 		t.Fatalf("all skipped: %d\n%s", code, out.String())
 	}
 }

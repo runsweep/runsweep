@@ -204,7 +204,7 @@ func TestMarkdownRetentionWarning(t *testing.T) {
 	if err := Markdown(&b, inc, res); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(b.String(), "**Scanned** 2 repos · 3 runs · 5 jobs\nWarning: incident window starts more than 90 days ago; GitHub may have deleted runs — absence of runs is not evidence.\n") {
+	if !strings.Contains(b.String(), "**Scanned** 2 repos · 3 runs · 5 jobs\n\n**Warning** incident window starts more than 90 days ago; GitHub may have deleted runs — absence of runs is not evidence.\n") {
 		t.Fatal(b.String())
 	}
 }
