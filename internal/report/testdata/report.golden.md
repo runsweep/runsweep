@@ -1,44 +1,77 @@
-# runsweep: `axios malicious release` (`axios-2026-03`)
+## runsweep · `axios-2026-03`
 
-Window: 2026-03-31 00:21:00 → 2026-03-31 03:21:00 UTC · repositories scanned: 2 · runs scanned: 3 · jobs scanned: 5
+> [!CAUTION]
+> **Exposed: 1 job ran a compromised package or action.**  
+> Rotate the 2 secrets under *Rotate first* now.
 
-**AFFECTED: 1 · POSSIBLE: 0 · UNCHECKED: 1**
+| 🛑 Affected | ⚠️ Possible | ❔ Unchecked | ✅ Clean |
+| :---: | :---: | :---: | :---: |
+| **1** | 0 | **1** | 3 |
 
-## Rotate first
+**Incident** `axios malicious release`  
+**Window** 2026-03-31 00:21 → 2026-03-31 03:21 UTC  
+**Scanned** 2 repos · 3 runs · 5 jobs
+
+### Rotate first
+
+1. **`OIDC token (id-token: write)`** · cloud  
+   review cloud roles  
+   Seen by 🛑 `o/app` run [17](https://github.com/o/app/actions/runs/42/job/7) › `build` attempt 2
+2. **`NPM_TOKEN`** · publish/deploy  
+   rotate  
+   Seen by 🛑 `o/app` run [17](https://github.com/o/app/actions/runs/42/job/7) › `build` attempt 2
 
 Secrets unknown for 1 job (workflow file, job list or run not available); review them manually: `o/old#9`.
 
-| # | Secret / role | Priority | Why | Seen in |
-|---|---|---|---|---|
-| 1 | `OIDC token (id-token: write)` | 1 · cloud · AFFECTED job | review cloud roles | `o/app#42 build attempt 2` |
-| 2 | `NPM_TOKEN` | 2 · publish/deploy · AFFECTED job | rotate | `o/app#42 build attempt 2` |
+### Not verified
 
-## Not verified — could not rule out exposure
+❔ 1 job could not be checked, so these secrets may have been exposed. Rotate them, or recover the evidence and run runsweep again.
 
-| # | Secret / role | Priority | Why | Seen in |
-|---|---|---|---|---|
-| 1 | `DEPLOY_KEY` | 2 · publish/deploy | rotate | `o/app#43 publish` |
+| Secret | Kind | Unchecked jobs | Why not verified |
+| --- | --- | :---: | --- |
+| **`DEPLOY_KEY`** | publish/deploy | 1 |  |
 
-## Findings
+### Findings
 
-| Status | Repo | Workflow / job | Run | Evidence |
-|---|---|---|---|---|
-| AFFECTED | `o/app` | `.github/workflows/ci.yml / build` | [42](https://github.com/o/app/actions/runs/42) attempt 2 | `axios@1.14.1 in package-lock.json at abcdef1` |
-| UNCHECKED | `o/old` | `.github/workflows/ci.yml` | 9 | `jobs unavailable: deleted by GitHub retention (HTTP 410)` |
+#### 🛑 Affected · 1
 
-## Skipped repositories
+| Repo | Workflow › job | Run | Evidence |
+| --- | --- | --- | --- |
+| `o/app` | `ci.yml` › `build` | [17](https://github.com/o/app/actions/runs/42/job/7) attempt 2 | `axios@1.14.1 in package-lock.json at abcdef1` |
+
+#### ❔ Unchecked · 1
+
+<details>
+<summary>1 job · jobs unavailable: deleted by GitHub retention (HTTP 410)</summary>
+
+| Repo | Workflow › job | Run | Evidence |
+| --- | --- | --- | --- |
+| `o/old` | `ci.yml` | 9 | `jobs unavailable: deleted by GitHub retention (HTTP 410)` |
+
+</details>
+
+#### ✅ Clean · 3
+
+Checked, nothing found.
+
+### Skipped repositories
 
 - `o/private` — `no access (HTTP 403/404)`
 
 The token needs read access to Actions, Contents and Metadata for these repositories.
 
-## Incident sources
+### Incident sources
 
 - `https://osv.dev/vulnerability/MAL-2026-2307`
 
 Malicious code can spread through caches, artifacts, self-hosted runners and workflow chains; see Limits
 
-## Limits
+---
+
+runsweep sees what job logs, workflow files and lockfiles show; some installs leave no trace there. Read the limits before you close the incident.
+
+<details>
+<summary>Limits · 22 things runsweep cannot see</summary>
 
 - GitHub deletes workflow runs, checks and logs after the repository's retention period (default 90 days). Older runs cannot be checked and show as UNCHECKED or are absent.
 - Which secrets a job could read is derived from the workflow file at the run's commit; GitHub's API does not expose it directly.
@@ -62,3 +95,7 @@ Malicious code can spread through caches, artifacts, self-hosted runners and wor
 - Runs that start after the window end are not scanned.
 - GitHub Enterprise is not supported; OIDC trust in nested reusable workflows is not resolved.
 - npm and GitHub Actions only.
+
+</details>
+
+runsweep dev · [How to read this report](https://github.com/runsweep/runsweep#readme)
