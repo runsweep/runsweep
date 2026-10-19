@@ -111,7 +111,7 @@ func Markdown(w io.Writer, inc *incident.Incident, r *model.Result) error {
 		code(inc.Title), r.Start.UTC().Format("2006-01-02 15:04"), r.End.UTC().Format("2006-01-02 15:04"),
 		count(r.ReposTargeted-len(r.Skipped), "repo"), count(r.RunsScanned, "run"), count(r.JobsScanned, "job"))
 	if r.RetentionWarning {
-		b.WriteString("Warning: " + RetentionNote + ".\n")
+		b.WriteString("\n**Warning** " + RetentionNote + ".\n")
 	}
 	b.WriteString("\n")
 	if full {
