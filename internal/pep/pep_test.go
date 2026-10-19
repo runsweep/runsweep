@@ -1,4 +1,3 @@
-// internal/pep/pep_test.go
 package pep
 
 import "testing"

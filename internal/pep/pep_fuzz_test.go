@@ -1,4 +1,3 @@
-// internal/pep/pep_fuzz_test.go
 package pep
 
 import "testing"
