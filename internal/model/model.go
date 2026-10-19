@@ -46,6 +46,7 @@ type Evidence struct {
 type RunRef struct {
 	Repo      string    `json:"repo"`
 	RunID     int64     `json:"run_id"`
+	RunNumber int64     `json:"run_number,omitempty"` // the run's number in its workflow, shown by Markdown
 	Workflow  string    `json:"workflow"`
 	HeadSHA   string    `json:"head_sha"`
 	RunURL    string    `json:"run_url"`

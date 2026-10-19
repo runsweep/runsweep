@@ -74,6 +74,11 @@ func TestDemoCassette(t *testing.T) {
 	if a, p, u := res.Count(model.Affected), res.Count(model.Possible), res.Count(model.Unchecked); a != 3 || p != 0 || u != 0 {
 		t.Fatalf("affected/possible/unchecked = %d/%d/%d, want 3/0/0", a, p, u)
 	}
+	for _, f := range res.Findings {
+		if f.Run.RunNumber == 0 {
+			t.Errorf("finding %+v has no run number", f.Run)
+		}
+	}
 	want := []model.RotationItem{
 		{Name: "aws role arn:aws:iam::123456789012:role/demo-deploy", Tier: 1},
 		{Name: "DEMO_NPM_TOKEN", Tier: 2},
