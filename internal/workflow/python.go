@@ -9,18 +9,19 @@ import (
 	"github.com/runsweep/runsweep/internal/pep"
 )
 
-// pyWordRe is a Python tool word, case-insensitively, with its version and .exe suffix. pyWords
+// pyWordRe is a Python tool word, case-insensitively, with its version (ABI flags and -dbg
+// included) and a Windows suffix (.exe, .bat, .cmd, .ps1). pyWords
 // checks its neighbours in code: the regexp never consumes them, so quotes, paths and adjacent
 // words never hide an occurrence.
-var pyWordRe = regexp.MustCompile(`(?i)(?:pip-sync|pip-compile|pre-commit|cibuildwheel|micromamba|pipenv|python(?:\d+(?:\.\d+)*)?|pypy(?:\d+(?:\.\d+)*)?|pipx|pip(?:\d+(?:\.\d+)*)?|poetry|pixi|py|uvx|uv|pdm|hatch|tox|nox|conda|mamba|rye|flit|maturin)(?:\.exe)?`)
+var pyWordRe = regexp.MustCompile(`(?i)(?:pip-sync|pip-compile|pre-commit|cibuildwheel|micromamba|pipenv|python(?:\d+(?:\.\d+)*[dmt]*)?(?:-dbg)?|pypy(?:\d+(?:\.\d+)*[dmt]*)?(?:-dbg)?|pipx|pip(?:\d+(?:\.\d+)*)?|poetry|pixi|py|uvx|uv|pdm|hatch|tox|nox|conda|mamba|rye|flit|maturin)(?:\.(?:exe|bat|cmd|ps1))?`)
 
 func pyWordByte(c byte) bool {
 	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-'
 }
 
 // pyWords returns the [start, end) of every Python tool word in text: not preceded by a word
-// character or '.', not followed by a word character, a path separator (python/ is a directory)
-// or a file extension (uv.lock, tox.ini). A '/' or '\' before the word is a path to it.
+// character or '.', not followed by a word character, a path separator (python/ is a directory),
+// '=' (PYTHON=… names a variable; the value stays a word) or a file extension (uv.lock, tox.ini). A '/' or '\' before the word is a path to it.
 func pyWords(text string) [][]int {
 	var out [][]int
 	for _, m := range pyWordRe.FindAllStringIndex(text, -1) {
@@ -28,7 +29,7 @@ func pyWords(text string) [][]int {
 		if s > 0 && (pyWordByte(text[s-1]) || text[s-1] == '.') {
 			continue
 		}
-		if e < len(text) && (pyWordByte(text[e]) || text[e] == '/' || text[e] == '\\' ||
+		if e < len(text) && (pyWordByte(text[e]) || text[e] == '/' || text[e] == '\\' || text[e] == '=' ||
 			text[e] == '.' && e+1 < len(text) && pyWordByte(text[e+1]) && text[e+1] != '-' && text[e+1] != '_') {
 			continue
 		}
@@ -55,9 +56,10 @@ var pyStartRe = regexp.MustCompile(`(?:^|[;&|({` + "`" + `]|\$\(|\b(?:then|do|el
 // is the module ("${{ steps.py.outputs.python-path }}" -m pip install x).
 var pyInterpRe = regexp.MustCompile(`(?:"[^"]*"|'[^']*'|\$\S+)\s+(?:-\S+\s+)*-m\s+$`)
 
-// pyNoCmd: words whose arguments are text, not commands.
+// pyNoCmd: words whose arguments are text or file names, not commands.
 var pyNoCmd = map[string]bool{"echo": true, "printf": true, "print": true, "cat": true, "grep": true, "which": true,
-	"type": true, "hash": true}
+	"type": true, "hash": true, "cd": true, "mkdir": true, "rm": true, "ls": true, "cp": true, "mv": true, "touch": true,
+	"chmod": true, "chown": true, "test": true, "[": true, "ln": true, "basename": true, "dirname": true, "realpath": true}
 
 var pyLeadWord = map[string]bool{"if": true, "elif": true, "while": true, "until": true, "then": true, "do": true, "else": true, "!": true}
 
@@ -144,10 +146,15 @@ func pyScan(text string) (out []PyInstall, spans [][2]int, skipped []int) {
 			skipped = append(skipped, wordStart)
 			continue // echo pip install x: an argument, not a command
 		}
-		tool := strings.TrimSuffix(strings.ToLower(text[wordStart:wordEnd]), ".exe")
+		tool := strings.ToLower(text[wordStart:wordEnd])
+		if i := strings.LastIndexByte(tool, '.'); i >= 0 && slices.Contains([]string{".exe", ".bat", ".cmd", ".ps1"}, tool[i:]) {
+			tool = tool[:i]
+		}
 		rest := text[wordEnd:]
+		quote := cmdStart < wordStart && (text[cmdStart] == '"' || text[cmdStart] == '\'')
 		if rest != "" && (rest[0] == '"' || rest[0] == '\'') {
 			rest = rest[1:] // the closing quote of a quoted command word
+			quote = false
 		}
 		restStart := len(text) - len(rest)
 		if i := strings.IndexByte(rest, '`'); i >= 0 && strings.Count(linePrefix, "`")%2 == 1 {
@@ -159,6 +166,9 @@ func pyScan(text string) (out []PyInstall, spans [][2]int, skipped []int) {
 			end = restStart + i
 		}
 		cmd := strings.TrimSpace(text[cmdStart:end])
+		if quote { // the opening quote of a string (bash -c 'pip install x'), not of the command word
+			cmd = strings.TrimSuffix(cmd[1:], text[cmdStart:cmdStart+1])
+		}
 		if i := strings.LastIndexAny(prefix, ";&|`"); i >= 0 {
 			prefix = prefix[i:] // both regexps read the last command only: a long line stays linear
 		}
@@ -215,6 +225,9 @@ func pyArgs(s string) (args []string, offs []int, capped bool) {
 		case argSep[c]:
 			i++
 		default:
+			if c == '#' {
+				return args, offs, false // a comment
+			}
 			if n++; n > maxArgs {
 				return args, offs, true
 			}
@@ -273,10 +286,20 @@ func positional(args []string) []string {
 	return out
 }
 
+// pyBase drops the version of a tool word: python3.13t-dbg is python, pip3.12 is pip.
+func pyBase(tool string) string {
+	for _, p := range []string{"python", "pypy"} {
+		if strings.HasPrefix(tool, p) {
+			return p
+		}
+	}
+	return strings.TrimRight(tool, "0123456789.")
+}
+
 // classify turns a tool word and its arguments into a PyInstall; ok is false for commands that
 // neither install nor run sdist code (pip list, python script.py).
 func classify(tool string, args []string) (PyInstall, bool) {
-	base := strings.TrimRight(tool, "0123456789.")
+	base := pyBase(tool)
 	pos := positional(args)
 	sub := func(i int) string {
 		if i < len(pos) {
@@ -401,7 +424,7 @@ var runValueFlags = map[string]bool{"--directory": true, "--project": true, "-C"
 // flags with their value; any other word is taken as the command, so a tool word after an unknown
 // flag's value is not at a command start.
 func runInner(tool string, args []string) int {
-	if base := strings.TrimRight(tool, "0123456789."); base == "python" || base == "py" || base == "pypy" {
+	if base := pyBase(tool); base == "python" || base == "py" || base == "pypy" {
 		mod, i := pyModule(args)
 		if mod != "uv" && mod != "poetry" {
 			return -1
