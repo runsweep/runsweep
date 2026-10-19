@@ -371,3 +371,46 @@ func TestAddVulnUnparsableIntroducedAndVPrefix(t *testing.T) {
 		t.Fatalf("npm %v notes %q", f.npm, f.notes)
 	}
 }
+
+func pypiVuln(id, name string, versions ...string) *Vuln {
+	v := &Vuln{ID: id, Affected: make([]Affected, 1)}
+	v.Affected[0].Package.Ecosystem, v.Affected[0].Package.Name, v.Affected[0].Versions = "PyPI", name, versions
+	return v
+}
+
+func TestAddVulnPyPI(t *testing.T) {
+	t.Run("unparsable version is skipped with a warning", func(t *testing.T) {
+		f := newFound()
+		f.addVuln(pypiVuln("MAL-2099-3", "Foo_Bar", "1.0", "not a version"))
+		if fmt.Sprint(sortedKeys(f.pypi["foo-bar"])) != "[1.0]" || len(f.warns) != 1 || !strings.Contains(f.warns[0], "unparsable PyPI version") {
+			t.Fatalf("%v %q", f.pypi, f.warns)
+		}
+	})
+	t.Run("no usable version widens to every version", func(t *testing.T) {
+		f := newFound()
+		f.addVuln(pypiVuln("MAL-2099-3", "foo", "bad!"))
+		if !f.pypi["foo"]["*"] || len(f.warns) != 2 {
+			t.Fatalf("%v %q", f.pypi, f.warns)
+		}
+	})
+	t.Run("widening survives record order", func(t *testing.T) {
+		for _, order := range [][]*Vuln{
+			{pypiVuln("MAL-2099-3", "foo", "1.0"), pypiVuln("MAL-2099-4", "foo")},
+			{pypiVuln("MAL-2099-4", "foo"), pypiVuln("MAL-2099-3", "foo", "1.0")},
+		} {
+			f := newFound()
+			for _, v := range order {
+				f.addVuln(v)
+			}
+			if !f.pypi["foo"]["*"] {
+				t.Fatalf("%v", f.pypi)
+			}
+		}
+	})
+	t.Run("invalid name is skipped with a warning", func(t *testing.T) {
+		f := newFound()
+		if !f.addVuln(pypiVuln("MAL-2099-3", "../x", "1.0")) || len(f.pypi) != 0 || len(f.warns) != 1 || !strings.Contains(f.warns[0], "invalid PyPI package name") {
+			t.Fatalf("%v %q", f.pypi, f.warns)
+		}
+	})
+}

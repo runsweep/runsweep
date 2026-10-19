@@ -277,7 +277,7 @@ func TestImportAliasAlreadyImported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(out), "# CVE-2025-30066: no npm or GitHub Actions entries; alias GHSA-mrrh-fwg8-r2c3 already imported") {
+	if !strings.Contains(string(out), "# CVE-2025-30066: no npm, PyPI or GitHub Actions entries; alias GHSA-mrrh-fwg8-r2c3 already imported") {
 		t.Errorf("missing note:\n%s", out)
 	}
 	for _, w := range warns {
@@ -430,6 +430,10 @@ func TestImportPyPI(t *testing.T) {
 	// no window flags: PyPI cannot compute one
 	if _, _, err := importWith(t, c, Options{IDs: []string{"MAL-2026-2144"}}); err == nil || !strings.Contains(err.Error(), "PyPI does not keep times of removed releases; pass --since and --until") {
 		t.Errorf("window: %v", err)
+	}
+	// PyPI entries need the window even when npm entries could compute one
+	if _, _, err := importWith(t, c, Options{IDs: []string{"MAL-2026-2307", "MAL-2026-2144"}}); err == nil || !strings.Contains(err.Error(), "pass --since and --until") {
+		t.Errorf("mixed: %v", err)
 	}
 	// --package pypi:NAME queries OSV for the PyPI ecosystem
 	b, _, err = importWith(t, c, Options{PyPI: []string{"LiteLLM"}, Since: since, Until: until})

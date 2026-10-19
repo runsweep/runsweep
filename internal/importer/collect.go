@@ -35,8 +35,8 @@ func (f *found) both(format string, a ...any) {
 	f.warns = append(f.warns, s)
 }
 
-// addVuln takes npm versions and GitHub Actions hints from one OSV record.
-// It reports whether the record had any npm or GitHub Actions entry.
+// addVuln takes npm and PyPI versions and GitHub Actions hints from one OSV record.
+// It reports whether the record had any npm, PyPI or GitHub Actions entry.
 func (f *found) addVuln(v *Vuln) bool {
 	if !ValidID(v.ID) {
 		return false
@@ -106,9 +106,9 @@ func (f *found) addVuln(v *Vuln) bool {
 				f.pypi[name][ver] = true
 				kept++
 			}
-			if kept == 0 && len(f.pypi[name]) == 0 {
+			if kept == 0 {
 				// D-007: no usable version list still means malicious; widen to every version.
-				f.pypi[name] = map[string]bool{"*": true}
+				f.pypi[name]["*"] = true // import.go collapses the set to "*"
 				f.both("%s: %s has no usable version list (%s) — every version treated as malicious", v.ID, name, rangeText(a))
 			}
 		case "GitHub Actions":
