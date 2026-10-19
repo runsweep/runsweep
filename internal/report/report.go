@@ -42,11 +42,15 @@ const limits = `- GitHub deletes workflow runs, checks and logs after the reposi
 - Called workflows are read when local or pinned to a commit SHA, and in the scanned repository's owner or a public repository; others are judged from the caller job, at least UNCHECKED for another owner's private repository.
 - Workflow files over 1 MiB, lockfiles or package.json over 32 MB, and those past the first 500 of a commit are not read; the job is at least UNCHECKED.
 - Lateral movement is not traced: caches, artifacts and needs outputs, dispatch and workflow_run chains, and self-hosted runners (runs-on is not read) can carry malicious code beyond the job that ran it. node_modules restored from a cache or artifact is not seen.
-- pull_request_target and workflow_run run the base-branch workflow, but files are read at head_sha: secrets and lockfile may differ from what ran, and a fork can control them. Such runs are at least UNCHECKED; lockfile and uses: evidence is capped at POSSIBLE; a bad action download in the log is still AFFECTED.
+- pull_request_target and workflow_run run the base-branch workflow, but files are read at head_sha: secrets and lockfile may differ from what ran, and a fork can control them. Such runs are at least UNCHECKED; lockfile and uses: evidence is capped at POSSIBLE; a bad action download in the log is still AFFECTED. PyPI evidence other than a job log line is at most POSSIBLE.
 - A job name made only of an expression, or equal to another job's id, leaves the job unidentified; its exposure is taken from the whole workflow, so more jobs are POSSIBLE or UNCHECKED.
 - Runs that start after the window end are not scanned.
 - GitHub Enterprise is not supported; OIDC trust in nested reusable workflows is not resolved.
-- npm and GitHub Actions only.
+- PyPI: requirements and constraints files (== pins), uv.lock, poetry.lock, pylock.toml and Pipfile.lock are read; pdm.lock is not. Files included with -r or -c are read only when their name looks like a requirements or constraints file.
+- PyPI installs are proven by pip, uv, poetry and pipx lines in the job log. A step whose output does not list every installed version (quiet or redirected output, uv run, build dependencies, a restored venv), wrappers (tox, nox, pre-commit, hatch, pdm, pipenv, pipx, uvx, conda, python -m build, pip wheel or download) and Python commands runsweep cannot classify (python script.py, tool words inside other commands) make the job UNCHECKED, or POSSIBLE when a lockfile anywhere in the repository pins a bad version; lockfiles are not linked to jobs.
+- A venv or site-packages restored from a cache shows only through "Requirement already satisfied" lines; a uv or poetry environment restored from a cache lists only what changed. Installs inside docker build, containers and scripts that silence all output are not seen. Build tools that call pip internally without a Python tool word in the job (sam build) and scripts that install silently, with no install output and no Python tool word in the step, are not seen.
+- PyPI version ranges (>=1,<2) are not compared.
+- npm, PyPI and GitHub Actions only.
 `
 
 // spreadNote warns that a finding may not be the whole damage; "" when nothing is AFFECTED or POSSIBLE.
