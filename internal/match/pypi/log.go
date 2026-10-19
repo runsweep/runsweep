@@ -73,6 +73,7 @@ type section struct {
 	uvSeen   bool            // an "Installed N" or "Audited" block was printed
 	resolved bool            // "Resolved N packages" was printed
 	envQuiet bool            // UV_QUIET or PIP_QUIET set in the step's environment
+	pwsh     bool            // the step runs in PowerShell
 	sawOut   bool            // the output showed any install, listing or partial line
 	poWant   int
 	poOpen   bool
@@ -153,7 +154,7 @@ func (s *section) finish() Section {
 	// a listing is proof only for commands seen in the script: none, a script run beside them, or
 	// a command that hides its output leave versions unaccounted for
 	out.Complete = out.Opaque == "" && !s.partial && !dynamic && !loop && s.blocks >= cmds &&
-		!workflow.RunsScript(out.Cmd) && !quietOutput(out.Cmd)
+		!workflow.RunsScript(out.Cmd) && !quietOutput(out.Cmd, s.pwsh)
 	return out
 }
 
@@ -186,20 +187,27 @@ type group struct {
 }
 
 // segments splits a script into commands on newlines, ;, &&, ||, groups and substitutions,
-// outside quotes, and drops comments. Pipes and redirects stay in their segment.
-func segments(script string) []segment {
+// outside quotes, and drops comments and heredoc bodies. Pipes and redirects stay in their
+// segment. quiet is true when the script cannot be followed: an open quote, group or heredoc at
+// the end, or a heredoc fed to a command that may run it (bash <<EOF, cat <<EOF | sh). In
+// PowerShell (pwsh), a backtick inside "…" escapes the next character.
+func segments(script string, pwsh bool) (segs []segment, quiet bool) {
+	type heredoc struct {
+		word string
+		seg  int // the segment of the command that reads it
+	}
 	type frame struct {
 		kind  byte // '(', '$', '`', '{'
 		quote byte // the quote state to restore on close
 		start int
 	}
 	var (
-		segs   []segment
-		groups []group
-		stack  []frame
-		cur    strings.Builder
-		quote  byte
-		param  int // open ${
+		groups  []group
+		stack   []frame
+		cur     strings.Builder
+		quote   byte
+		param   int // open ${
+		pending []heredoc
 	)
 	cut := func() { segs = append(segs, segment{text: cur.String()}); cur.Reset() }
 	wordStart := func() bool {
@@ -236,7 +244,11 @@ func segments(script string) []segment {
 				quote = 0
 			}
 			cur.WriteByte(c)
-		case c == '\\' && next != 0:
+		case pwsh && quote == '"' && c == '`' && next != 0:
+			cur.WriteByte(c)
+			cur.WriteByte(next)
+			i++
+		case c == '\\' && next != 0 && !pwsh:
 			cur.WriteByte(c)
 			cur.WriteByte(next)
 			i++
@@ -261,8 +273,31 @@ func segments(script string) []segment {
 			for i+1 < len(script) && script[i+1] != '\n' {
 				i++
 			}
-		case c == '\n' || c == ';':
+		case c == '\n':
 			cut()
+			for _, h := range pending {
+				end := skipHeredoc(script, i+1, h.word)
+				if end < 0 {
+					return segs, true // no terminator line
+				}
+				i = end - 1
+				if !feedsData(segs[h.seg].text) {
+					quiet = true
+				}
+			}
+			pending = nil
+		case c == ';':
+			cut()
+		case c == '<' && next == '<' && quote == 0:
+			word, end := heredocWord(script, i)
+			if end < 0 {
+				return segs, true
+			}
+			if word != "" {
+				pending = append(pending, heredoc{word, len(segs)})
+			}
+			cur.WriteString(script[i:end])
+			i = end - 1
 		case (c == '&' || c == '|') && next == c:
 			i++
 			cut()
@@ -290,6 +325,9 @@ func segments(script string) []segment {
 		}
 	}
 	cut()
+	if quote != 0 || len(stack) > 0 || param > 0 || len(pending) > 0 {
+		quiet = true
+	}
 	for _, g := range groups {
 		if g.captured || g.end < len(segs) && hidesOutput(pipeline(segs[g.end].text)) {
 			for i := g.start; i < g.end; i++ {
@@ -297,7 +335,83 @@ func segments(script string) []segment {
 			}
 		}
 	}
-	return segs
+	return segs, quiet
+}
+
+// heredocWord reads the heredoc operator at script[i] ("<<"): its terminator word (unquoted) and
+// the end of the operator. A here-string (<<<) or a shift (1<<2) has no word; end < 0 for an
+// unterminated quoted word.
+func heredocWord(script string, i int) (word string, end int) {
+	j := i + 2
+	if j < len(script) && script[j] == '<' {
+		return "", j + 1
+	}
+	if j < len(script) && script[j] == '-' {
+		j++
+	}
+	for j < len(script) && (script[j] == ' ' || script[j] == '\t') {
+		j++
+	}
+	if j == len(script) {
+		return "", j
+	}
+	if q := script[j]; q == '\'' || q == '"' {
+		k := strings.IndexByte(script[j+1:], q)
+		if k < 0 {
+			return "", -1
+		}
+		return script[j+1 : j+1+k], j + 2 + k
+	}
+	if c := script[j]; c != '_' && c != '\\' && (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') {
+		return "", i + 2
+	}
+	k := j
+	for k < len(script) && !strings.ContainsRune(" \t\n;&|<>()", rune(script[k])) {
+		k++
+	}
+	return strings.NewReplacer("\\", "", "'", "", `"`, "").Replace(script[j:k]), k
+}
+
+// skipHeredoc returns the position after the heredoc body that starts at pos and its terminator
+// line, or -1 when no line is the terminator.
+func skipHeredoc(script string, pos int, word string) int {
+	for pos < len(script) {
+		line, _, found := strings.Cut(script[pos:], "\n")
+		pos += len(line) + 1
+		if strings.TrimSpace(line) == word {
+			return min(pos, len(script))
+		}
+		if !found {
+			break
+		}
+	}
+	return -1
+}
+
+// dataWords read a heredoc as data.
+var dataWords = map[string]bool{"cat": true, "tee": true, "read": true, "mapfile": true, "readarray": true,
+	"grep": true, "sed": true, "awk": true, "jq": true, "envsubst": true}
+
+// feedsData reports whether every command of a pipeline only reads its input as data.
+func feedsData(seg string) bool {
+	for _, el := range pipeline(seg) {
+		if w := leadStripped(el); !dataWords[w] {
+			return false
+		}
+	}
+	return true
+}
+
+// leadStripped is the first word of a command after if/then/do/… keywords.
+func leadStripped(text string) string {
+	f := strings.Fields(text)
+	for len(f) > 0 && leadWords[f[0]] {
+		f = f[1:]
+	}
+	if len(f) == 0 {
+		return ""
+	}
+	return f[0]
 }
 
 // pipeline splits a command on unquoted | (and |&).
@@ -385,11 +499,13 @@ func countInstalls(text string) int {
 }
 
 var (
-	quietRe   = regexp.MustCompile(`(?:^|\s)(?:-[a-zA-Z]*q[a-zA-Z]*|--quiet)(?:[\s=]|$)`)
-	textWords = map[string]bool{"echo": true, "printf": true, "print": true, "cat": true}
-	leadWords = map[string]bool{"then": true, "do": true, "else": true, "if": true, "elif": true, "while": true, "until": true, "!": true}
-	endWords  = map[string]bool{"fi": true, "done": true, "esac": true}
-	funcRe    = regexp.MustCompile(`(?:^|[\s;&|])(?:function\s+[\w.:-]+|[\w.:-]+\s*\(\s*\))`) // a shell function definition
+	quietRe     = regexp.MustCompile(`(?:^|\s)(?:-[a-zA-Z]*q[a-zA-Z]*|--quiet)(?:[\s=]|$)`)
+	textWords   = map[string]bool{"echo": true, "printf": true, "print": true, "cat": true}
+	leadWords   = map[string]bool{"then": true, "do": true, "else": true, "if": true, "elif": true, "while": true, "until": true, "!": true}
+	endWords    = map[string]bool{"fi": true, "done": true, "esac": true}
+	pwshShellRe = regexp.MustCompile(`(?i)^\s*shell: .*\b(?:pwsh|powershell)\b`)
+	pwshTextRe  = regexp.MustCompile(`(?i)write-host|\$env:|\|\s*out-null|\*>\s*\$null`)
+	funcRe      = regexp.MustCompile(`(?:^|[\s;&|])(?:function\s+[\w.:-]+|[\w.:-]+\s*\(\s*\))`) // a shell function definition
 )
 
 // joinLines joins shell (\) and PowerShell (`) continued lines. A line ending in a backtick
@@ -413,18 +529,25 @@ func joinLines(script string) string {
 // quietOutput reports whether an install command of the script asks for quiet output (a quiet
 // flag) or hides it (stdout redirected, piped into anything but tee, captured by $(…), or the same
 // done to its enclosing group, if-block or loop).
-func quietOutput(script string) bool {
+func quietOutput(script string, pwsh bool) bool {
 	script = joinLines(script)
-	if funcRe.MatchString(script) {
+	if funcRe.MatchString(quotedRe.ReplaceAllString(script, "")) {
 		return true // ponytail: a shell function's output may be piped where it is called; not followed
 	}
-	found := 0
-	for _, seg := range segments(script) {
+	segs, quiet := segments(script, pwsh || pwshTextRe.MatchString(script))
+	if quiet {
+		return true
+	}
+	found, muted := 0, false
+	for _, seg := range segs {
 		text := strings.TrimSpace(seg.text)
 		w := firstWord(text)
 		for leadWords[w] {
 			text = strings.TrimSpace(text[len(w):])
 			w = firstWord(text)
+		}
+		if w == "exec" && redirectsStdout(quotedRe.ReplaceAllString(text[len(w):], "")) {
+			muted = true // exec >/dev/null: every later command's output is hidden
 		}
 		if endWords[w] {
 			if hidesOutput(pipeline(text[len(w):])) {
@@ -442,7 +565,7 @@ func quietOutput(script string) bool {
 				continue
 			}
 			found += n
-			if seg.hidden || hidesOutput(els[i:]) || quietRe.MatchString(quotedRe.ReplaceAllString(strings.Join(els[i:], " "), "")) {
+			if muted || seg.hidden || hidesOutput(els[i:]) || quietRe.MatchString(quotedRe.ReplaceAllString(strings.Join(els[i:], " "), "")) {
 				return true
 			}
 		}
@@ -520,9 +643,11 @@ func ParseLog(log string) Log {
 				cur.echoText = append(cur.echoText, sgrRe.ReplaceAllString(tsRe.ReplaceAllString(raw, ""), ""))
 				continue
 			}
-			if m := envQuietRe.FindStringSubmatch(sgrRe.ReplaceAllString(tsRe.ReplaceAllString(raw, ""), "")); m != nil && envQuiet(m[0]) {
+			hl := sgrRe.ReplaceAllString(tsRe.ReplaceAllString(raw, ""), "")
+			if m := envQuietRe.FindStringSubmatch(hl); m != nil && envQuiet(m[0]) {
 				cur.envQuiet = true
 			}
+			cur.pwsh = cur.pwsh || pwshShellRe.MatchString(hl)
 		}
 		if !containsAny(raw, lineLiterals) {
 			continue
