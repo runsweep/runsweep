@@ -1,0 +1,2 @@
+{"_meta": {}, "default": {"litellm": {"version": "==1.82.8", "hashes": ["sha256:aa"]}},
+ "develop": {"pytest": {"version": "==8.0.0"}, "vcs": {"git": "https://x", "ref": "y"}}}

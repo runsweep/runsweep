@@ -1,0 +1,11 @@
+[[package]]
+name = "LiteLLM"
+version = "1.82.7"
+description = ""
+optional = false
+python-versions = ">=3.8"
+files = [{file = "litellm-1.82.7-py3-none-any.whl", hash = "sha256:aaaa"}]
+
+[metadata]
+lock-version = "2.1"
+content-hash = "x"
