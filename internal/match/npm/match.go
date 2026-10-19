@@ -34,6 +34,8 @@ type Result struct {
 	Pinned []string
 	// Rest: the status from everything but the pins.
 	Rest model.Status
+	// NoLock: directories of package.json files with dependencies and no lockfile.
+	NoLock []string
 }
 
 // mark raises the status for evidence other than a pin.
@@ -49,7 +51,7 @@ type Unlocked struct {
 // Resolve folds r.Unlocked into the status: POSSIBLE where installed(Dir), otherwise UNCHECKED
 // with a note that the job does not seem to install it.
 func (r Result) Resolve(installed func(dir string) bool) Result {
-	out := Result{Status: r.Status, Evidence: slices.Clone(r.Evidence), Pinned: r.Pinned, Rest: r.Rest}
+	out := Result{Status: r.Status, Evidence: slices.Clone(r.Evidence), Pinned: r.Pinned, Rest: r.Rest, NoLock: r.NoLock}
 	for _, u := range r.Unlocked {
 		if installed(u.Dir) {
 			out.mark(model.Possible)
@@ -363,6 +365,7 @@ func (c *Cache) Match(ctx context.Context, f Fetcher, repo, sha string, bad []in
 			if lockNames[dir] == nil && !failedDirs[dir] && len(names) > 0 {
 				r.mark(model.Unchecked)
 				r.Evidence = append(r.Evidence, model.Evidence{Kind: "note", Detail: fmt.Sprintf("no lockfile for %s — transitive dependencies unknown", pj.path)})
+				r.NoLock = append(r.NoLock, pdir)
 			}
 		}
 	}

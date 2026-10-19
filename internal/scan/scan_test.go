@@ -1175,6 +1175,44 @@ func TestScanNoLockfileWithoutInstallInLog(t *testing.T) {
 	}
 }
 
+// A build tool may install silently: a quiet job with one is UNCHECKED for a package.json with
+// no lockfile in the root or a directory it names, never CLEAN; elsewhere it stays dropped.
+func TestScanNoLockfileBuildTool(t *testing.T) {
+	fx := func(steps, pj, manifest string) *sourcetest.Fake {
+		f := sourcetest.New()
+		f.Runs["o/a"] = []source.Run{{ID: 1, Path: ".github/workflows/ci.yml", HeadSHA: "s1", CreatedAt: t0}}
+		f.Jobs[1] = []source.Job{{ID: 10, Name: "rust"}}
+		f.AddFile("o/a", "s1", ".github/workflows/ci.yml", []byte("on: push\njobs:\n  rust:\n    runs-on: x\n    steps:\n      - uses: actions/checkout@v4\n"+steps))
+		f.AddFile("o/a", "s1", pj, []byte(manifest))
+		f.Logs[10] = "2026-03-31T01:00:00Z    Compiling serde v1.0.0\n"
+		return f
+	}
+	cargo := "      - run: cargo build\n"
+	other := `{"dependencies":{"left-pad":"^1"}}`
+	for name, f := range map[string]*sourcetest.Fake{
+		"root":      fx(cargo, "package.json", other),
+		"named dir": fx("      - run: cargo build\n        working-directory: bindings/node\n", "bindings/node/package.json", other),
+		"pip, root": fx("      - run: pip install .\n", "package.json", other),
+	} {
+		if fd := scanOne(t, f, npmOnly); fd.Status != model.Unchecked || !hasNote(fd, "no lockfile for") || !hasNote(fd, "job runs a build tool that may install silently") {
+			t.Errorf("%s: %+v", name, fd)
+		}
+	}
+	// a bad direct dependency in the root stays POSSIBLE
+	if fd := scanOne(t, fx(cargo, "package.json", `{"dependencies":{"axios":"^1.14.0"}}`), npmOnly); fd.Status != model.Possible {
+		t.Errorf("direct dep: %+v", fd)
+	}
+	// nothing links the job to an unnamed directory, and a job with no build tool cannot install
+	for name, f := range map[string]*sourcetest.Fake{
+		"unnamed dir":   fx(cargo, "bindings/node/package.json", other),
+		"no build tool": fx("      - run: make test\n", "package.json", other),
+	} {
+		if res, err := Run(context.Background(), f, npmOnly, Options{Repos: []string{"o/a"}}); err != nil || len(res.Findings) != 0 {
+			t.Errorf("%s: %v %+v", name, err, res.Findings)
+		}
+	}
+}
+
 func TestInstallLogRe(t *testing.T) {
 	for line, want := range map[string]bool{
 		"added 312 packages, and audited 313 packages in 4s":                     true,
