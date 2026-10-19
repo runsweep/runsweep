@@ -78,6 +78,7 @@ type section struct {
 	uvNames  map[string]bool // distinct packages listed since then
 	uvSeen   bool            // an "Installed N" or "Audited" block was printed
 	resolved bool            // "Resolved N packages" was printed
+	sawOut   bool            // the output showed any install, listing or partial line
 	poWant   int
 	poOpen   bool
 	poNames  map[string]bool
@@ -146,9 +147,14 @@ func (s *section) finish() Section {
 		out.Complete = out.Opaque == ""
 		return out
 	}
+	if cmds == 0 {
+		// no install command: complete only if nothing in the output looks like an install
+		out.Complete = out.Opaque == "" && !s.sawOut && !s.partial
+		return out
+	}
 	// a listing is proof only for commands seen in the script: none, a script run beside them, or
 	// a command that hides its output leave versions unaccounted for
-	out.Complete = out.Opaque == "" && !s.partial && !dynamic && !loop && cmds > 0 && s.blocks >= cmds &&
+	out.Complete = out.Opaque == "" && !s.partial && !dynamic && !loop && s.blocks >= cmds &&
 		!workflow.RunsScript(out.Cmd) && !quietOutput(out.Cmd)
 	return out
 }
@@ -275,7 +281,7 @@ func versionText(v pep.Version) string {
 }
 
 func (l *Log) parseLine(cur *section, line string, n int) {
-	install := func() { cur.Python, l.Calls = true, true }
+	install := func() { cur.Python, l.Calls, cur.sawOut = true, true, true }
 	switch {
 	case setupUVRe.MatchString(line):
 	case pipDoneRe.MatchString(line):
@@ -314,7 +320,7 @@ func (l *Log) parseLine(cur *section, line string, n int) {
 		cur.uvWant, _ = strconv.Atoi(uvDoneRe.FindStringSubmatch(line)[1])
 		cur.uvOpen, cur.uvSeen, cur.uvNames = true, true, map[string]bool{}
 	case uvResolvedRe.MatchString(line):
-		cur.resolved = true
+		cur.resolved, cur.sawOut = true, true
 	case uvLineRe.MatchString(line):
 		install()
 		m := uvLineRe.FindStringSubmatch(line)

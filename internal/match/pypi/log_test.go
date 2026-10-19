@@ -279,3 +279,32 @@ func TestParseLogHeaderOutput(t *testing.T) {
 		t.Errorf("injected header: %+v", l)
 	}
 }
+
+func TestParseLogNoInstallCommands(t *testing.T) {
+	for name, c := range map[string]struct {
+		script   string
+		out      []string
+		complete bool
+	}{
+		"pytest":             {"python -m pytest", nil, true},
+		"pip list":           {"pip list", nil, true},
+		"pip version":        {"pip --version", []string{"pip 26.2 from /x (python 3.12)"}, true},
+		"uv version":         {"uv --version", []string{"uv 0.12.1"}, true},
+		"poetry config":      {"poetry config virtualenvs.in-project true", nil, true},
+		"pytest installs":    {"python -m pytest", []string{"Successfully installed x-1"}, false},
+		"make beside pytest": {"make test\npython -m pytest", nil, true},
+		"make that installs": {"make test", []string{"Installed 3 packages in 1ms"}, false},
+		"resolved only":      {"pip list", []string{"Resolved 3 packages in 1ms"}, false},
+	} {
+		l := ParseLog(step(c.script, c.out...))
+		var py []Section
+		for _, s := range l.Sections {
+			if s.Python {
+				py = append(py, s)
+			}
+		}
+		if len(py) != 1 || py[0].Complete != c.complete {
+			t.Errorf("%s: %+v", name, l.Sections)
+		}
+	}
+}
