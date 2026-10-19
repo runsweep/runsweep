@@ -153,7 +153,7 @@ func mdVerdict(r *model.Result) string {
 	var kind, head, todo string
 	switch {
 	case r.Incomplete:
-		kind, head = "WARNING", "Scan incomplete: "+Clean(r.Error)+"."
+		kind, head = "WARNING", "Scan incomplete: "+code(r.Error)+"."
 		todo = "The report covers only what was checked; an empty section proves nothing."
 	case a > 0:
 		kind, head = "CAUTION", fmt.Sprintf("Exposed: %s ran a compromised package or action.", count(a, "job"))
