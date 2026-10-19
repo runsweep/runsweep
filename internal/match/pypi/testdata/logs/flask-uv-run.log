@@ -1,0 +1,25 @@
+2026-08-01T12:01:56.0454713Z Successfully set up CPython (3.12.13)
+2026-08-01T12:01:56.0455667Z ##[endgroup]
+2026-08-01T12:01:56.0599998Z ##[group]Run uv run --locked --no-default-groups --group dev tox run
+2026-08-01T12:01:56.0600636Z [36;1muv run --locked --no-default-groups --group dev tox run[0m
+2026-08-01T12:01:56.0725691Z shell: /usr/bin/bash -e {0}
+2026-08-01T12:01:56.0726054Z env:
+2026-08-01T12:01:56.0726389Z   UV_PYTHON_INSTALL_DIR: /home/runner/work/_temp/uv-python-dir
+2026-08-01T12:01:56.0727216Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+2026-08-01T12:01:56.0727687Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.13/x64
+2026-08-01T12:01:56.0728217Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.13/x64/lib/pkgconfig
+2026-08-01T12:01:56.0728739Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.13/x64
+2026-08-01T12:01:56.0729204Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.13/x64
+2026-08-01T12:01:56.0729673Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.13/x64
+2026-08-01T12:01:56.0730139Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.13/x64/lib
+2026-08-01T12:01:56.0730598Z   TOX_ENV: py3.12
+2026-08-01T12:01:56.0730840Z ##[endgroup]
+2026-08-01T12:01:56.6440308Z Using CPython 3.12.13 interpreter at: /opt/hostedtoolcache/Python/3.12.13/x64/bin/python3
+2026-08-01T12:01:56.6441856Z Creating virtual environment at: .venv
+2026-08-01T12:01:56.6504474Z    Building flask @ file:///home/runner/work/flask/flask
+2026-08-01T12:01:57.3212760Z       Built flask @ file:///home/runner/work/flask/flask
+2026-08-01T12:01:57.3324730Z Installed 23 packages in 10ms
+2026-08-01T12:01:58.7397307Z py3.12: venv> .venv/bin/uv venv -p cpython3.12 --allow-existing '--prompt=flask[py3.12]' --python-preference system /home/runner/work/flask/flask/.tox/py3.12
+2026-08-01T12:01:58.9454779Z py3.12: uv-sync> .venv/bin/uv sync --locked --python-preference system --no-default-groups --no-editable --reinstall-package Flask --group tests -p cpython3.12
+2026-08-01T12:01:59.2431971Z py3.12: freeze> .venv/bin/uv --color never pip freeze
+2026-08-01T12:01:59.2573289Z py3.12: asgiref==3.12.1,blinker==1.9.0,click==8.4.2,flask @ file:///home/runner/work/flask/flask,iniconfig==2.3.0,itsdangerous==2.2.0,jinja2==3.1.6,markupsafe==3.0.3,packaging==26.2,pluggy==1.6.0,pygments==2.20.0,pytest==9.1.1,python-dotenv==1.2.2,werkzeug==3.1.8

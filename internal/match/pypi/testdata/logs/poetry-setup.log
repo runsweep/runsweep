@@ -1,0 +1,82 @@
+2026-08-01T10:29:39.9369190Z ##[group]Run actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+2026-08-01T10:29:39.9370020Z with:
+2026-08-01T10:29:39.9370440Z   python-version: 3.10
+2026-08-01T10:29:39.9370920Z   check-latest: false
+2026-08-01T10:29:39.9371630Z   allow-prereleases: true
+2026-08-01T10:29:39.9372170Z   update-environment: false
+2026-08-01T10:29:39.9378210Z   token: ***
+2026-08-01T10:29:39.9378550Z   freethreaded: false
+2026-08-01T10:29:39.9378900Z env:
+2026-08-01T10:29:39.9379240Z   PYTHONWARNDEFAULTENCODING: true
+2026-08-01T10:29:39.9379690Z ##[endgroup]
+2026-08-01T10:29:40.0841860Z ##[group]Installed versions
+2026-08-01T10:29:40.0908610Z Version ~3.10.0-0 was not found in the local cache
+2026-08-01T10:29:41.2580790Z Version ~3.10.0-0 is available for downloading
+2026-08-01T10:29:41.2581460Z Download from "https://github.com/actions/python-versions/releases/download/3.10.11-11114431484/python-3.10.11-darwin-arm64.tar.gz"
+2026-08-01T10:29:41.9262100Z Extract downloaded archive
+2026-08-01T10:29:41.9449780Z [command]/usr/bin/tar xz -C /Users/runner/work/_temp/20d9e6a6-9d08-4e1b-adb1-ebeb2c95d173 -f /Users/runner/work/_temp/3cb520eb-77e4-4af0-b1b9-6a88e3ce8f30
+2026-08-01T10:29:42.0061410Z Execute installation script
+2026-08-01T10:29:42.0250900Z Check if Python hostedtoolcache folder exist...
+2026-08-01T10:29:42.0352480Z Install Python binaries from prebuilt package
+2026-08-01T10:29:52.6667780Z installer: Package name is Python
+2026-08-01T10:29:52.6668720Z installer: Upgrading at base path /
+2026-08-01T10:29:52.6669100Z installer: The upgrade was successful.
+2026-08-01T10:29:52.6679800Z Create hostedtoolcach symlinks (Required for the backward compatibility)
+2026-08-01T10:29:52.6680440Z Create Python 3.10.11 folder
+2026-08-01T10:29:52.6766230Z Create additional symlinks (Required for the UsePythonVersion Azure Pipelines task and the setup-python GitHub Action)
+2026-08-01T10:29:52.6824600Z Upgrading pip...
+2026-08-01T10:29:53.7204630Z Looking in links: /var/folders/g3/pffjr_y96bq06blnkf72x_hw0000gn/T/tmpvrrtcjnu
+2026-08-01T10:29:53.7206580Z Requirement already satisfied: setuptools in /Library/Frameworks/Python.framework/Versions/3.10/lib/python3.10/site-packages (65.5.0)
+2026-08-01T10:29:53.7209940Z Requirement already satisfied: pip in /Library/Frameworks/Python.framework/Versions/3.10/lib/python3.10/site-packages (23.0.1)
+2026-08-01T10:29:54.0445110Z Collecting pip
+2026-08-01T10:29:54.0988800Z Downloading pip-26.2-py3-none-any.whl (1.8 MB)
+2026-08-01T10:29:54.1606050Z ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.8/1.8 MB 30.1 MB/s eta 0:00:00
+2026-08-01T10:29:54.1606490Z 
+2026-08-01T10:29:54.1837520Z Installing collected packages: pip
+2026-08-01T10:29:54.1837950Z Attempting uninstall: pip
+2026-08-01T10:29:54.1840590Z Found existing installation: pip 23.0.1
+2026-08-01T10:29:54.2658490Z Uninstalling pip-23.0.1:
+2026-08-01T10:29:54.4226200Z Successfully uninstalled pip-23.0.1
+2026-08-01T10:29:54.9059730Z Successfully installed pip-26.2
+2026-08-01T10:29:54.9387960Z Install OpenSSL certificates
+2026-08-01T10:29:55.2405340Z Collecting certifi
+2026-08-01T10:29:55.2869430Z Downloading certifi-2026.7.22-py3-none-any.whl.metadata (2.5 kB)
+2026-08-01T10:29:55.3060010Z Downloading certifi-2026.7.22-py3-none-any.whl (136 kB)
+2026-08-01T10:29:55.3451840Z Installing collected packages: certifi
+2026-08-01T10:29:55.3511070Z Successfully installed certifi-2026.7.22
+2026-08-01T10:29:55.3823870Z -- pip install --upgrade certifi
+2026-08-01T10:29:55.3824160Z  -- removing any existing file or link
+2026-08-01T10:29:55.3824410Z  -- creating symlink to certifi certificate bundle
+2026-08-01T10:29:55.3824650Z  -- setting permissions
+2026-08-01T10:29:55.3824830Z  -- update complete
+2026-08-01T10:29:55.3858310Z Create complete file
+2026-08-01T10:29:55.3895930Z Successfully set up CPython (3.10.11)
+2026-08-01T10:29:55.3896820Z ##[endgroup]
+2026-08-01T10:29:55.3963130Z ##[end-action id=__self.setup-python;outcome=success;conclusion=success;duration_ms=15470]
+2026-08-01T10:29:55.3969510Z ##[start-action display=Run pipx install ${PYTHON_PATH:+--python "$PYTHON_PATH"} "${POETRY_SPEC}";id=__self.__run]
+2026-08-01T10:29:55.3996800Z ##[group]Run pipx install ${PYTHON_PATH:+--python "$PYTHON_PATH"} "${POETRY_SPEC}"
+2026-08-01T10:29:55.3997260Z [36;1mpipx install ${PYTHON_PATH:+--python "$PYTHON_PATH"} "${POETRY_SPEC}"[0m
+2026-08-01T10:29:55.4057410Z shell: /bin/bash --noprofile --norc -e -o pipefail {0}
+2026-08-01T10:29:55.4057650Z env:
+2026-08-01T10:29:55.4057780Z   PYTHONWARNDEFAULTENCODING: true
+2026-08-01T10:29:55.4058070Z   PYTHON_PATH: /Users/runner/hostedtoolcache/Python/3.10.11/arm64/bin/python
+2026-08-01T10:29:55.4058360Z   POETRY_SPEC: poetry
+2026-08-01T10:29:55.4058500Z ##[endgroup]
+2026-08-01T10:29:55.7190020Z /opt/homebrew/Cellar/pipx/1.15.0/libexec/lib/python3.14/site-packages/pipx/main.py:1371: EncodingWarning: 'encoding' argument not specified
+2026-08-01T10:29:55.7190640Z   with open(cachedir_tag, "w") as file:
+2026-08-01T10:29:55.7200380Z creating virtual environment...
+2026-08-01T10:29:55.7514710Z creating shared libraries...
+2026-08-01T10:29:57.5132430Z upgrading shared libraries...
+2026-08-01T10:29:58.7157550Z WARNING: Skipping setuptools as it is not installed.
+2026-08-01T10:29:58.7800590Z /opt/homebrew/Cellar/pipx/1.15.0/libexec/lib/python3.14/site-packages/pipx/backends/pip.py:71: EncodingWarning: 'encoding' argument not specified
+2026-08-01T10:29:58.7801250Z   pipx_pth.write_text(f"{shared_libs.site_packages}\n")
+2026-08-01T10:29:58.7870210Z installing poetry...
+2026-08-01T10:30:04.5056320Z done! ✨ 🌟 ✨
+2026-08-01T10:30:04.5056740Z   installed package poetry 2.4.1, installed using Python 3.10.11
+2026-08-01T10:30:04.5057290Z   These apps are now available
+2026-08-01T10:30:04.5060940Z     - poetry
+2026-08-01T10:30:04.5272030Z ##[end-action id=__self.__run;outcome=success;conclusion=success;duration_ms=9130]
+2026-08-01T10:30:04.5274110Z ##[start-action display=Run git config --system core.longpaths true;id=__self.__run_2]
+2026-08-01T10:30:04.5279200Z ##[end-action id=__self.__run_2;outcome=skipped;conclusion=skipped;duration_ms=0]
+2026-08-01T10:30:04.5280710Z ##[start-action display=Run poetry config virtualenvs.use-poetry-python true;id=__self.__run_3]
+2026-08-01T10:30:04.5299340Z ##[group]Run poetry config virtualenvs.use-poetry-python true
