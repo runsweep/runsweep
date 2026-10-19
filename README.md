@@ -108,14 +108,14 @@ refs:
 ```bash
 runsweep incidents import MAL-2026-2307 GHSA-g7cv-rxg3-hmpx -o incident.yaml   # OSV ids (MAL-, GHSA-, CVE-)
 runsweep incidents import --package npm:axios                                   # every MAL-* record for a package
-runsweep incidents import --package pypi:litellm --since 2026-03-24T10:39:00Z --until 2026-03-24T16:00:00Z
+runsweep incidents import --package pypi:litellm --since 2026-03-24T00:00:00Z --until 2026-03-24T23:59:59Z
 grep -o 'MAL-[0-9]*-[0-9]*' advisory.txt | runsweep incidents import            # ids on stdin, one per line
 runsweep incidents import --action owner/repo@<40-hex sha> --since 2026-03-19T17:43:00Z --until 2026-03-20T06:00:00Z
 ```
 
 It takes the npm versions OSV lists (an OSV range — with no versions listed, or with no fix — is expanded to the registry versions inside it; if none are, the package gets `["*"]`, every version), looks up their publish times in the npm registry and derives the window: the start is the earliest publish, the end is when the registry shows the versions removed, or now if any is still published. Packages are grouped by when their bad versions were first published; groups separated by more than 7 days are treated as separate waves. The largest group (the latest on a tie) and everything after it are kept, earlier groups are dropped as unrelated and listed in a comment (`--keep-all` keeps everything). A package is never split. Every assumption is written as a comment in the file; check them, and override the window with `--since` / `--until` when a source gives better times.
 
-PyPI does not keep upload times of removed releases, so a PyPI import needs `--since` and `--until`. Ids on stdin are read only when no ids, `--package` or `--action` are given (at most 10 000). An import that has only `--action` needs `--since` and `--until`. GitHub Actions advisories are reported on stderr: OSV has no commit SHAs, so pass them with `--action`. The output is validated before it is written; `-o` replaces the file atomically. Only `api.osv.dev` and `registry.npmjs.org` are contacted. Any error, including an unknown subcommand, exits with `2`.
+Ids on stdin are read only when no ids, `--package` or `--action` are given (at most 10 000). An import that has only `--action` needs `--since` and `--until`. PyPI does not keep upload times of removed releases, so a PyPI import needs `--since` and `--until`. GitHub Actions advisories are reported on stderr: OSV has no commit SHAs, so pass them with `--action`. The output is validated before it is written; `-o` replaces the file atomically. Only `api.osv.dev` and `registry.npmjs.org` are contacted. Any error, including an unknown subcommand, exits with `2`.
 
 ## How it decides
 
@@ -158,12 +158,12 @@ For AFFECTED and POSSIBLE jobs the report lists what the job could read — secr
 - PyPI installs are proven by pip, uv, poetry and pipx lines in the job log. A step whose output does not list every installed version (quiet or redirected output, `uv run`, build dependencies, a restored venv), wrappers (tox, nox, pre-commit, hatch, pdm, pipenv, pipx, uvx, conda, `python -m build`, `pip wheel` or `pip download`) and Python commands runsweep cannot classify (`python script.py`, tool words inside other commands) make the job UNCHECKED, or POSSIBLE when a lockfile anywhere in the repository pins a bad version; lockfiles are not linked to jobs.
 - A venv or site-packages restored from a cache shows only through "Requirement already satisfied" lines; a uv or poetry environment restored from a cache lists only what changed. Installs inside `docker build`, containers and scripts that silence all output are not seen. Build tools that call pip internally without a Python tool word in the job (`sam build`) and scripts that install silently, with no install output and no Python tool word in the step, are not seen.
 - PyPI version ranges (`>=1,<2`) are not compared.
-- - Runs that start after the window end are not scanned.
+- Runs that start after the window end are not scanned.
 - GitHub Enterprise (GHES, GHE.com) is not supported.
 - A large organization takes hours under the 5000 requests/hour rate limit: scan with `--repo`, or narrow the window with `--since` / `--until`.
 - OIDC `id-token` access in nested reusable workflows is not resolved; cloud roles reached only that way may be missing from the list.
 - A job name made only of an expression (`${{ matrix.os }}`), or equal to another job's id, leaves the job unidentified; its exposure is taken from the whole workflow, which gives more POSSIBLE and UNCHECKED jobs.
-- npm and GitHub Actions only; no PyPI yet.
+- npm, PyPI and GitHub Actions only.
 
 ## FAQ
 
