@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -405,5 +406,37 @@ func TestImportNoUsableRangeIsEveryVersion(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(warns, "|"), "eslint-validator affected by range only (fixed 1.0.1) with no usable start — every version treated as malicious") {
 		t.Fatalf("warns %q", warns)
+	}
+}
+
+func TestImportPyPI(t *testing.T) {
+	c, _ := fixtures(t, nil)
+	since, until := time.Date(2026, 3, 24, 0, 0, 0, 0, time.UTC), time.Date(2026, 3, 25, 23, 59, 59, 0, time.UTC)
+	b, _, err := importWith(t, c, Options{IDs: []string{"MAL-2026-2144", "MAL-2025-6794", "MAL-2099-2"}, Since: since, Until: until})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inc, err := incident.Parse(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string][]string{}
+	for _, p := range inc.PyPI {
+		got[p.Name] = p.Versions
+	}
+	if !slices.Equal(got["litellm"], []string{"1.82.7", "1.82.8"}) || !slices.Equal(got["num2words"], []string{"0.5.15", "0.5.16"}) || !slices.Equal(got["evil-pkg"], []string{"*"}) {
+		t.Errorf("%v\n%s", got, b)
+	}
+	// no window flags: PyPI cannot compute one
+	if _, _, err := importWith(t, c, Options{IDs: []string{"MAL-2026-2144"}}); err == nil || !strings.Contains(err.Error(), "PyPI does not keep times of removed releases; pass --since and --until") {
+		t.Errorf("window: %v", err)
+	}
+	// --package pypi:NAME queries OSV for the PyPI ecosystem
+	b, _, err = importWith(t, c, Options{PyPI: []string{"LiteLLM"}, Since: since, Until: until})
+	if err != nil || !strings.Contains(string(b), `{name: "litellm", versions: ["1.82.7", "1.82.8"]}`) {
+		t.Errorf("package: %v\n%s", err, b)
+	}
+	if _, _, err := importWith(t, c, Options{PyPI: []string{"../x"}, Since: since, Until: until}); err == nil || !strings.Contains(err.Error(), "invalid PyPI package name") {
+		t.Errorf("bad name: %v", err)
 	}
 }

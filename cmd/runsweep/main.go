@@ -408,9 +408,10 @@ func importCmd(d deps) *cobra.Command {
 	var since, until, out string
 	c := &cobra.Command{
 		Use:   "import [OSV-ID...]",
-		Short: "Build an incident file from OSV advisories and npm registry publish times",
+		Short: "Build an incident file from OSV advisories (npm windows from registry publish times)",
 		Example: `  runsweep incidents import MAL-2026-2307 -o axios.yaml
   runsweep incidents import --package npm:axios
+  runsweep incidents import --package pypi:litellm --since 2026-03-24T00:00:00Z --until 2026-03-25T23:59:59Z
   grep -o 'MAL-[0-9-]*' advisory.txt | runsweep incidents import -o incident.yaml
   runsweep incidents import --action owner/repo@<sha> --since 2026-03-19T17:43:00Z --until 2026-03-20T06:00:00Z`,
 		RunE: func(c *cobra.Command, args []string) error {
@@ -426,14 +427,17 @@ func importCmd(d deps) *cobra.Command {
 				}
 			}
 			for _, p := range packages {
-				name, ok := strings.CutPrefix(p, "npm:")
-				if !ok {
-					return fmt.Errorf("--package %q: want npm:NAME", p)
+				switch eco, name, _ := strings.Cut(p, ":"); eco {
+				case "npm":
+					o.Packages = append(o.Packages, name)
+				case "pypi":
+					o.PyPI = append(o.PyPI, name)
+				default:
+					return fmt.Errorf("--package %q: want npm:NAME or pypi:NAME", p)
 				}
-				o.Packages = append(o.Packages, name)
 			}
-			if len(o.IDs) == 0 && len(o.Packages) == 0 && len(o.Actions) == 0 {
-				return errors.New("nothing to import: pass OSV ids (as arguments or on stdin), --package npm:NAME or --action owner/repo@SHA")
+			if len(o.IDs) == 0 && len(o.Packages) == 0 && len(o.PyPI) == 0 && len(o.Actions) == 0 {
+				return errors.New("nothing to import: pass OSV ids (as arguments or on stdin), --package npm:NAME or pypi:NAME or --action owner/repo@SHA")
 			}
 			for _, f := range []struct {
 				val string
@@ -465,7 +469,7 @@ func importCmd(d deps) *cobra.Command {
 			return writeAtomic(out, b)
 		},
 	}
-	c.Flags().StringArrayVar(&packages, "package", nil, "npm:NAME — import every MAL-* record OSV has for the package (repeatable)")
+	c.Flags().StringArrayVar(&packages, "package", nil, "npm:NAME or pypi:NAME — import every MAL-* record OSV has for the package (repeatable)")
 	c.Flags().StringArrayVar(&o.Actions, "action", nil, "compromised action commit owner/repo@<40-hex sha> (repeatable)")
 	c.Flags().StringVar(&o.ID, "id", "", "incident id (default import-<window start date>)")
 	c.Flags().StringVar(&o.Title, "title", "", "incident title (default: the first OSV ids)")

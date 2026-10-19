@@ -9,11 +9,13 @@ import (
 	"strings"
 
 	"github.com/runsweep/runsweep/internal/model"
+	"github.com/runsweep/runsweep/internal/pep"
 )
 
 // found accumulates what the importer extracted from OSV records and flags.
 type found struct {
 	npm     map[string]map[string]bool // package -> versions
+	pypi    map[string]map[string]bool // normalized package -> versions
 	actions map[string]map[string]bool // owner/repo -> commit SHAs
 	notes   []string                   // YAML comment lines (without "# ")
 	warns   []string                   // stderr warnings
@@ -23,7 +25,7 @@ type found struct {
 }
 
 func newFound() *found {
-	return &found{ranges: map[string][]segment{}, npm: map[string]map[string]bool{}, actions: map[string]map[string]bool{}, seen: map[string]bool{}}
+	return &found{ranges: map[string][]segment{}, npm: map[string]map[string]bool{}, pypi: map[string]map[string]bool{}, actions: map[string]map[string]bool{}, seen: map[string]bool{}}
 }
 
 // both records the same text as a YAML note and a warning.
@@ -83,6 +85,31 @@ func (f *found) addVuln(v *Vuln) bool {
 					ver = t
 				}
 				f.addNPM(name, ver)
+			}
+		case "PyPI":
+			useful = true
+			raw := a.Package.Name
+			if !pep.ValidName(raw) {
+				f.both("%s: skipped invalid PyPI package name %q", v.ID, raw)
+				continue
+			}
+			name := pep.Name(raw)
+			if f.pypi[name] == nil {
+				f.pypi[name] = map[string]bool{}
+			}
+			kept := 0
+			for _, ver := range a.Versions {
+				if _, ok := pep.ParseVersion(ver); !ok {
+					f.both("skipped unparsable PyPI version %q in %s", ver, v.ID)
+					continue
+				}
+				f.pypi[name][ver] = true
+				kept++
+			}
+			if kept == 0 && len(f.pypi[name]) == 0 {
+				// D-007: no usable version list still means malicious; widen to every version.
+				f.pypi[name] = map[string]bool{"*": true}
+				f.both("%s: %s has no usable version list (%s) — every version treated as malicious", v.ID, name, rangeText(a))
 			}
 		case "GitHub Actions":
 			useful = true

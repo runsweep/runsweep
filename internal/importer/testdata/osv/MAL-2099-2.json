@@ -1,0 +1,2 @@
+{"id": "MAL-2099-2", "summary": "test", "affected": [{"package": {"ecosystem": "PyPI", "name": "Evil_Pkg"},
+ "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}]}]}]}
