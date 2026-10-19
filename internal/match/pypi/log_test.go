@@ -404,3 +404,53 @@ func TestParseLogQuietSegments(t *testing.T) {
 		}
 	}
 }
+
+func TestParseLogQuietRound5(t *testing.T) {
+	out := []string{"Successfully installed x-1", "Successfully installed z-1", "Successfully installed w-1"}
+	pwsh := func(script string) string {
+		return strings.Replace(step(script+"\npip install z", out...), "shell: /usr/bin/bash -e {0}",
+			`shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"`, 1)
+	}
+	for name, c := range map[string]struct {
+		log      string
+		complete bool
+	}{
+		"heredoc apostrophe":    {step("cat <<EOF\nDon't\nEOF\npip install x | tail -1\npip install z", out...), false},
+		"pwsh newline escape":   {step("Write-Host \"`n\"\npip install -r r.txt | Out-Null\npip install z", out...), false},
+		"pwsh tab escape":       {step("Write-Host \"a`tb\"\npip install x | Select-Object -Last 1\npip install z", out...), false},
+		"pwsh escape clean":     {step("Write-Host \"a`tb\"\npip install x\npip install z", out...), true},
+		"pwsh shell escape":     {pwsh("Write-Output \"a`tb\"\npip install x"), true},
+		"pwsh shell pipe":       {pwsh("Write-Output \"a`tb\"\npip install x | Select-Object -Last 1"), false},
+		"open quote":            {step("echo \"unterminated\npip install x | tail\npip install z", out...), false},
+		"open quote no pipe":    {step("echo \"unterminated\npip install x\npip install z", out...), false},
+		"open group":            {step("(pip install x\npip install z", out...), false},
+		"heredoc quoted body":   {step("cat <<'EOF'\nDon't | tail\nEOF\npip install x\npip install z", out...), true},
+		"heredoc dash":          {step("cat <<-EOF\n\tit's\n\tEOF\npip install x\npip install z", out...), true},
+		"heredoc to file":       {step("cat > f.txt <<\"EOF\"\na'b > c\nEOF\npip install x\npip install z", out...), true},
+		"heredoc bash":          {step("bash <<EOF\npip install x\nEOF\npip install z", out...), false},
+		"heredoc bash quoted":   {step("bash <<'EOF'\npip install -q x\nEOF\npip install z", out...), false},
+		"heredoc python":        {step("python - <<EOF\nimport os\nEOF\npip install z", out...), false},
+		"heredoc piped to sh":   {step("cat <<EOF | sh\necho hi\nEOF\npip install z", out...), false},
+		"heredoc unterminated":  {step("cat <<EOF\nno end\npip install z", out...), false},
+		"arith shift":           {step("echo $((1<<2))\npip install z", out...), true},
+		"here-string":           {step("cat <<<'it''s'\npip install z", out...), true},
+		"exec devnull":          {step("exec >/dev/null\npip install z", out...), false},
+		"exec 1>log":            {step("exec 1>log.txt\npip install z", out...), false},
+		"exec &>log":            {step("exec &>log.txt\npip install z", out...), false},
+		"exec stderr only":      {step("exec 2>err.txt\npip install z", out...), true},
+		"round4 numpy quoted":   {step("pip install \"numpy>1.20\"\npip install z", out...), true},
+		"round4 pytest -q":      {step("pip install -r r.txt && pytest -q\npip install z", out...), true},
+		"round4 stderr to file": {step("pip install x 2>err.txt\npip install z", out...), true},
+	} {
+		if s := sectionOf(t, c.log); s.Complete != c.complete {
+			t.Errorf("%s: complete=%v, want %v (%q)", name, s.Complete, c.complete, s.Cmd)
+		}
+	}
+	// a call with parentheses inside quotes is not a function definition
+	if quietOutput("python -c \"import torch; print(torch.cuda.is_available())\"\npip install x", false) {
+		t.Error("quoted call counted as a function definition")
+	}
+	if !quietOutput("f() { pip install x; }\nf | tail", false) {
+		t.Error("function definition not quiet")
+	}
+}
