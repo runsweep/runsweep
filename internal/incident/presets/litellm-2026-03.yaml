@@ -1,0 +1,14 @@
+id: litellm-2026-03
+title: "litellm 1.82.7 / 1.82.8 on PyPI (credential stealer; 1.82.8 adds a .pth hook)"
+# start: 1.82.7 published 2026-03-24 10:39 UTC (https://docs.litellm.ai/blog/security-townhall-updates),
+# 1.82.8 at 10:52 UTC (https://futuresearch.ai/blog/litellm-pypi-supply-chain-attack/); rounded down to the day.
+# end: quarantined ~11:19 UTC, deleted 2026-03-24T15:27:48Z (https://github.com/BerriAI/litellm/issues/24518);
+# rounded up to the end of the day.
+window: {start: 2026-03-24T00:00:00Z, end: 2026-03-24T23:59:59Z}
+pypi:
+  - {name: litellm, versions: ["1.82.7", "1.82.8"]}
+refs:
+  - https://osv.dev/vulnerability/MAL-2026-2144
+  - https://github.com/BerriAI/litellm/issues/24518
+  - https://docs.litellm.ai/blog/security-townhall-updates
+  - https://futuresearch.ai/blog/litellm-pypi-supply-chain-attack/

@@ -97,9 +97,13 @@ refs:
 |---|---|
 | `axios-2026-03` | axios 1.14.1 / 0.30.4 malicious release |
 | `chaindrop-2026-08` | Shai-Hulud wave: keyv / cacheable and 400+ npm packages |
+| `lightning-2026-04` | lightning 2.6.2 / 2.6.3 on PyPI (Shai-Hulud wave) |
+| `litellm-2026-03` | litellm 1.82.7 / 1.82.8 on PyPI (credential stealer; 1.82.8 adds a .pth hook) |
+| `mrmustard-2026-07` | mrmustard 0.7.4 on PyPI (credential stealer) |
 | `tanstack-2026-05` | Mini Shai-Hulud wave: TanStack and 128 other npm packages, 170 packages / 432 versions (CVE-2026-45321) |
 | `tj-actions-2025-03` | tj-actions/changed-files compromised (CVE-2025-30066) |
 | `trivy-action-2026-03` | aquasecurity/trivy-action and setup-trivy tags hijacked (CVE-2026-33634) |
+| `ultralytics-2024-12` | ultralytics 8.3.41 / 8.3.42 / 8.3.45 / 8.3.46 on PyPI (GitHub Actions injection, cryptominer) |
 
 ## Importing a new incident
 
