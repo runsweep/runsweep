@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPyInstalls(t *testing.T) {
@@ -253,5 +254,68 @@ func TestPyInstallsCmdQuote(t *testing.T) {
 	}
 	if got := PyInstalls(`"$VENV/bin/python" -m pip install x`); len(got) != 1 || got[0].Cmd != `"$VENV/bin/python" -m pip install x` {
 		t.Errorf("got %+v", got)
+	}
+}
+
+func TestPyInstallsFinalReview(t *testing.T) {
+	// C1 and M2: a closed substitution before a tool word is part of the command head, and a
+	// substitution that is the command word is a command; each yields an entry or Opaque, never nothing
+	for _, s := range []string{
+		"X=$(cat f) pip install -q -r requirements.txt",
+		"PYTHONPATH=$(dirname .) pip install -q litellm",
+		"$(which python) -m pip install -q -r requirements.txt",
+		`"$(which python)" -m pip install -q -r requirements.txt`,
+		"$(command -v python3) -m pip install -q -r requirements.txt",
+		"sudo $(which pip) install -q litellm",
+		"sudo `which pip` install -q litellm",
+		`"${PIP_CMD:-pip}" install -q -r r.txt`,
+		`${PY:=python} -m pip install -q x`,
+	} {
+		if got := PyInstalls(s); len(got) == 0 {
+			t.Errorf("%q: no command", s)
+		}
+	}
+	// the assignment prefix keeps rule 3: the package is named
+	if got := PyInstalls("PYTHONPATH=$(dirname .) pip install -q litellm"); len(got) != 1 || got[0].Opaque || !slices.Equal(got[0].Pkgs, []string{"litellm"}) {
+		t.Errorf("assignment prefix: %+v", got)
+	}
+	// still skipped: echo-like words at their own command head, substitutions as values
+	for _, s := range []string{"echo $(date) pip install x", "PY=$(which python3)", "cd $(dirname $(which python))", "for p in $(which -a python3); do :; done"} {
+		if got := PyInstalls(s); len(got) != 0 {
+			t.Errorf("%q: %+v", s, got)
+		}
+	}
+	// M6: a variable inside a path is not a package named at run time
+	if got := PyInstalls("uv pip sync ${X}/r.txt"); len(got) != 1 || got[0].Dynamic {
+		t.Errorf("path with variable: %+v", got)
+	}
+	// I3: a command that installs only named packages says so; -r, -e and clusters holding them do not
+	for s, want := range map[string]bool{"python -m pip install --upgrade pip": true, "pip install flake8 pytest": true,
+		"pip install -r requirements.txt": false, "pip install -Ur r.txt pip": false, "pip install -e . pip": false,
+		"pip install pip ./x": false, "pip install $P": false, "pip install --upgrade-strategy eager -U x": false} {
+		if got := PyInstalls(s); len(got) != 1 || got[0].Named != want {
+			t.Errorf("%q: %+v, want Named=%v", s, got, want)
+		}
+	}
+}
+
+func TestPyInstallsLongLine(t *testing.T) {
+	// M1: a long line costs linear time, and a line too long to read is Opaque, never fewer commands
+	for _, s := range []string{
+		strings.Repeat("x pip;", 4000) + strings.Repeat("a", 1<<20-24000),
+		strings.Repeat("a", 1<<20-24000) + strings.Repeat(" x pip;", 4000),
+		`echo "` + strings.Repeat("a pip ", 4000) + strings.Repeat("b", 1<<20-24000),
+		strings.Repeat("a", 1<<20) + " pip install -q x",
+		strings.Repeat("x pip;", pyMaxLine/6), // the longest line read, full of words
+		strings.Repeat(`echo "x pip `, pyMaxLine/12),
+	} {
+		start := time.Now()
+		got := PyInstalls(s)
+		if d := time.Since(start); d > 500*time.Millisecond {
+			t.Errorf("len %d: %v", len(s), d)
+		}
+		if len(s) > pyMaxLine && (len(got) == 0 || !got[0].Opaque) {
+			t.Errorf("len %d: %+v", len(s), got)
+		}
 	}
 }

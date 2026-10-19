@@ -60,7 +60,8 @@ func FuzzParseTokenPerms(f *testing.F) {
 
 func FuzzPyInstalls(f *testing.F) {
 	for _, s := range []string{"pip install x==1", "sudo -H python3 -m pip install -r r.txt", "uv run tox", "echo pip install x", "pip install $X `y`",
-		`bash -c "pip install litellm && rm -rf /tmp/pipcache"`, "uv run --env-file .env sh -c 'pip install x'", "# pip\nfoo \"/a b/pip\" x"} {
+		`bash -c "pip install litellm && rm -rf /tmp/pipcache"`, "uv run --env-file .env sh -c 'pip install x'", "# pip\nfoo \"/a b/pip\" x",
+		"X=$(cat f) pip install -q x", "sudo $(which pip) install x", "echo `which python` -m pip"} {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, s string) {
@@ -68,8 +69,42 @@ func FuzzPyInstalls(f *testing.F) {
 		text := continuation.Replace(s)
 		_, spans, skipped := pyScan(text)
 		for _, w := range pyWords(text) {
-			if !slices.Contains(skipped, w[0]) && !slices.ContainsFunc(spans, func(sp [2]int) bool { return sp[0] <= w[0] && w[0] < max(sp[1], sp[0]+1) }) {
+			if !slices.ContainsFunc(skipped, func(sk [2]int) bool { return sk[0] == w[0] }) &&
+				!slices.ContainsFunc(spans, func(sp [2]int) bool { return sp[0] <= w[0] && w[0] < max(sp[1], sp[0]+1) }) {
 				t.Fatalf("tool word at %d left uncovered in %q (spans %v)", w[0], text, spans)
+			}
+		}
+		// an echo-like word skips a tool word only as the head of its command: it is not inside a
+		// ( or backtick substitution that closes before the tool word
+		for _, sk := range skipped {
+			word, lead := sk[0], sk[1]
+			if lead < 0 {
+				continue
+			}
+			lineStart := strings.LastIndexByte(text[:lead], '\n') + 1
+			opens, ticks := 0, 0
+			for _, c := range []byte(text[lineStart:lead]) {
+				switch {
+				case c == '(':
+					opens++
+				case c == ')' && opens > 0:
+					opens--
+				case c == '`':
+					ticks++
+				}
+			}
+			depth := 0
+			for _, c := range []byte(text[lead:word]) {
+				switch {
+				case c == '(':
+					depth++
+				case c == ')' && depth > 0:
+					depth--
+				case c == ')' && opens > 0:
+					t.Fatalf("word at %d skipped by %q inside a closed (…) in %q", word, text[lead:word], text)
+				case c == '`' && ticks%2 == 1:
+					t.Fatalf("word at %d skipped by %q inside a closed backtick in %q", word, text[lead:word], text)
+				}
 			}
 		}
 		for _, in := range PyInstalls(s) {
