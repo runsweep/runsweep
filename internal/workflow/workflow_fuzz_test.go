@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/runsweep/runsweep/internal/pep"
 )
 
 func FuzzWorkflowParse(f *testing.F) {
@@ -50,6 +52,21 @@ func FuzzParseTokenPerms(f *testing.F) {
 		for k, v := range ParseTokenPerms(log) {
 			if k != strings.TrimSpace(k) || k != strings.ToLower(k) || v != strings.TrimSpace(v) {
 				t.Fatalf("untrimmed or mixed-case permission %q: %q", k, v)
+			}
+		}
+	})
+}
+
+func FuzzPyInstalls(f *testing.F) {
+	for _, s := range []string{"pip install x==1", "sudo -H python3 -m pip install -r r.txt", "uv run tox", "echo pip install x", "pip install $X `y`"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		for _, in := range PyInstalls(s) {
+			for _, p := range in.Pkgs {
+				if p != pep.Name(p) {
+					t.Fatalf("not normalized: %q", p)
+				}
 			}
 		}
 	})
