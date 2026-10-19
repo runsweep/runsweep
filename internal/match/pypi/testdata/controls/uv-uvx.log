@@ -1,0 +1,20 @@
+2026-08-01T23:04:10.4323659Z ##[group]Run uvx ruff format --diff .
+2026-08-01T23:04:10.4326086Z [36;1muvx ruff format --diff .[0m
+2026-08-01T23:04:10.4341958Z shell: /usr/bin/bash -e {0}
+2026-08-01T23:04:10.4344915Z env:
+2026-08-01T23:04:10.4346846Z   UV_PYTHON_INSTALL_DIR: /home/runner/work/_temp/uv-python-dir
+2026-08-01T23:04:10.4350361Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+2026-08-01T23:04:10.4353398Z ##[endgroup]
+2026-08-01T23:04:10.5844266Z 230 files already formatted
+2026-08-01T23:04:10.6368619Z Post job cleanup.
+2026-08-01T23:04:10.8536470Z UV_CACHE_DIR is already set to /home/runner/work/_temp/setup-uv-cache
+2026-08-01T23:04:10.8563500Z UV_PYTHON_INSTALL_DIR is already set to /home/runner/work/_temp/uv-python-dir
+2026-08-01T23:04:10.8572772Z Cache hit occurred on key setup-uv-2-x86_64-unknown-linux-gnu-ubuntu-24.04-unknown-060cdd892c753aabacd45b9a36e6e866e44998dada29c78b828152dea2c56c68, not saving cache.
+2026-08-01T23:04:11.0007655Z Post job cleanup.
+2026-08-01T23:04:11.2297583Z [command]/usr/bin/git version
+2026-08-01T23:04:11.2452523Z git version 2.54.0
+2026-08-01T23:04:11.2547148Z Temporarily overriding HOME='/home/runner/work/_temp/d3f283af-b76b-4975-8055-6cb975400d16' before making global git config changes
+2026-08-01T23:04:11.2555727Z Adding repository directory to the temporary git global config as a safe directory
+2026-08-01T23:04:11.2571864Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/uv/uv
+2026-08-01T23:04:11.2718845Z Removing SSH command configuration
+2026-08-01T23:04:11.2720960Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand

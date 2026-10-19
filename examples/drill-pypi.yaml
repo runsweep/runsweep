@@ -1,0 +1,10 @@
+# Fire drill for the Python jobs of the runsweep-demo repo: pretends a harmless pinned package
+# was compromised. Not a real incident.
+# The window is a placeholder (2026-10-19): set it to the day of the demo runs in
+# runsweep/runsweep-demo before the demo scan.
+id: drill-pypi
+title: "Fire drill: six 1.17.0 on PyPI"
+window: {start: 2026-10-19T00:00:00Z, end: 2026-10-19T23:59:59Z}
+pypi:
+  - {name: six, versions: ["1.17.0"]}
+refs: [https://github.com/runsweep/runsweep-demo]

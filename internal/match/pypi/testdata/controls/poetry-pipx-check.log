@@ -1,0 +1,26 @@
+2026-08-01T14:32:40.3244752Z ##[group]Run pipx install ${PYTHON_PATH:+--python "$PYTHON_PATH"} "${POETRY_SPEC}"
+2026-08-01T14:32:40.3246308Z [36;1mpipx install ${PYTHON_PATH:+--python "$PYTHON_PATH"} "${POETRY_SPEC}"[0m
+2026-08-01T14:32:40.3297481Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-08-01T14:32:40.3298464Z env:
+2026-08-01T14:32:40.3299198Z   PYTHON_PATH: 
+2026-08-01T14:32:40.3299968Z   POETRY_SPEC: poetry
+2026-08-01T14:32:40.3300945Z ##[endgroup]
+2026-08-01T14:32:40.7441861Z creating virtual environment...
+2026-08-01T14:32:40.9279784Z installing poetry...
+2026-08-01T14:32:48.4045229Z done! ✨ 🌟 ✨
+2026-08-01T14:32:48.4051901Z   installed package poetry 2.4.1, installed using Python 3.12.3
+2026-08-01T14:32:48.4052857Z   These apps are now available
+2026-08-01T14:32:48.4053338Z     - poetry
+2026-08-01T14:32:48.4313065Z ##[end-action id=__self.__run;outcome=success;conclusion=success;duration_ms=8112]
+2026-08-01T14:32:48.4316938Z ##[start-action display=Run git config --system core.longpaths true;id=__self.__run_2]
+2026-08-01T14:32:48.4326830Z ##[end-action id=__self.__run_2;outcome=skipped;conclusion=skipped;duration_ms=0]
+2026-08-01T14:32:48.4329318Z ##[start-action display=Run poetry config virtualenvs.use-poetry-python true;id=__self.__run_3]
+2026-08-01T14:32:48.4355919Z ##[group]Run poetry config virtualenvs.use-poetry-python true
+2026-08-01T14:32:48.4356466Z [36;1mpoetry config virtualenvs.use-poetry-python true[0m
+2026-08-01T14:32:48.4401999Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-08-01T14:32:48.4402424Z ##[endgroup]
+2026-08-01T14:32:49.0376055Z ##[end-action id=__self.__run_3;outcome=success;conclusion=success;duration_ms=604]
+2026-08-01T14:32:49.0425902Z ##[group]Run poetry check --lock
+2026-08-01T14:32:49.0426231Z [36;1mpoetry check --lock[0m
+2026-08-01T14:32:49.0469698Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-08-01T14:32:49.0470050Z ##[endgroup]
