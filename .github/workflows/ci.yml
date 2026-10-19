@@ -68,6 +68,7 @@ jobs:
           - {pkg: ./internal/match/actions, target: FuzzMatchLog}
           - {pkg: ./internal/incident, target: FuzzIncidentParse}
           - {pkg: ./internal/report, target: FuzzClean}
+          - {pkg: ./internal/report, target: FuzzMarkdown}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: {persist-credentials: false}
