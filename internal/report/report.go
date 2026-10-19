@@ -208,6 +208,10 @@ func actionLine(r *model.Result, status string, now bool) string {
 	if k > 0 {
 		return fmt.Sprintf("Rotate the %s under *Rotate first* now.", count(k, "secret"))
 	}
+	pre := ""
+	if status == "AFFECTED" {
+		pre = "The AFFECTED jobs are not confirmed to have read any secret. "
+	}
 	var parts []string
 	if len(r.Rotation) > 0 {
 		parts = append(parts, "*Also review*")
@@ -221,11 +225,11 @@ func actionLine(r *model.Result, status string, now bool) string {
 	}
 	switch {
 	case len(parts) > 0:
-		return "Review the secrets under " + strings.Join(parts, " and ") + end
+		return pre + "Review the secrets under " + strings.Join(parts, " and ") + end
 	case len(secretsUnknown(r)) > 0:
-		return "Secrets are unknown for some jobs; review them manually, see *Rotate first*."
+		return pre + "Secrets are unknown for some jobs; review them manually, see *Rotate first*."
 	}
-	return "Review the " + status + " jobs under *Findings*."
+	return pre + "Review the " + status + " jobs under *Findings*."
 }
 
 // mdCounts renders the status counters; non-zero risk counts are bold.
