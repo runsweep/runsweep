@@ -84,6 +84,7 @@ type section struct {
 	tox      bool            // the step's script runs tox (tox, python -m tox)
 	toxEnv   map[string]bool // tox environments that ran: true once a listing of every package was read
 	toxWait  map[string]bool // a tox 4 freeze> line whose listing has not been read yet
+	toxBad   map[string]bool // environments no listing can complete: an sdist or editable package, a custom freeze, tox 3
 	toxSetup bool            // inside a tox action that sets an environment up: the listing covers its installer output
 	toxCmds  []string        // the commands tox ran (commands[N]>, run-test:): installs there need their own output
 	scratch  *section        // takes the installer output of tox setup actions
@@ -148,7 +149,7 @@ func (s *section) finish() Section {
 	toxOK := false
 	if len(s.toxEnv) > 0 {
 		script += "\n" + strings.Join(s.toxCmds, "\n")
-		toxOK = !slices.Contains(slices.Collect(maps.Values(s.toxEnv)), false) && !s.envQuiet && !envQuiet(script) &&
+		toxOK = !slices.Contains(slices.Collect(maps.Values(s.toxEnv)), false) && len(s.toxBad) == 0 && !s.envQuiet && !envQuiet(script) &&
 			!quietFor(script, s.pwsh, countTox)
 		if !toxOK {
 			out.Opaque = "tox"
@@ -896,13 +897,16 @@ func splitFile(f string) (name, ver string, ok bool) {
 var (
 	// tox 4: "<env>: <action>> <command>"; tox -vv puts "<ms> <level> " before the action and a
 	// " [file:line]" source after the line
-	toxActRe = regexp.MustCompile(`^([.\w+-]+): (\d+ [A-Z] )?([a-z_-]+(?:\[\d+\])?)(?: [^>]*)?> (.*)$`)
-	toxEnvRe = regexp.MustCompile(`^([.\w+-]+):(?: (\d+ [A-Z] )?(.*))?$`)
+	// (an env name is anything up to the ": " separator: docs:html, non-ASCII letters)
+	toxActRe = regexp.MustCompile(`^(\S+?): (\d+ [A-Z] )?([a-z_-]+(?:\[\d+\])?)(?: [^>]*)?> (.*)$`)
+	toxEnvRe = regexp.MustCompile(`^(\S+?):(?: (\d+ [A-Z] )?(.*))?$`)
 	toxSrcRe = regexp.MustCompile(` \[[\w/.-]+:\d+\]$`)
 	// the result of an environment, tox 4 and tox 3
-	toxSumRe = regexp.MustCompile(`^\s*(?:ERROR:\s+)?([.\w+-]+): (?:OK|FAIL|commands succeeded|commands failed)\b`)
+	toxSumRe = regexp.MustCompile(`^\s*(?:ERROR:\s+)?(\S+?): (?:OK|FAIL|commands succeeded|commands failed)\b`)
 	// tox 3: "<env> <action>: <text>"
-	tox3Re = regexp.MustCompile(`^([.\w+-]+) (create|recreate|installdeps|inst|inst-nodeps|develop-inst|develop-inst-nodeps|develop-inst-noop|installed|run-test-pre|run-test|run-test-post):(?: (.*))?$`)
+	tox3Re = regexp.MustCompile(`^(\S+?) (create|recreate|installdeps|inst|inst-nodeps|develop-inst|develop-inst-nodeps|develop-inst-noop|installed|run-test-pre|run-test|run-test-post):(?: (.*))?$`)
+	// tox 4's own list_dependencies_command: pip freeze --all, or tox-uv's uv pip freeze
+	toxFreezeRe = regexp.MustCompile(`^(?:(?:\S*[/\\])?python[\d.]*(?:\.exe)? (?:-I )?-m pip|(?:\S*[/\\])?pip[\d.]*(?:\.exe)?) freeze --all$|^(?:\S*[/\\])?uv(?:\.exe)? --color never pip freeze$`)
 	// a listing entry for a local directory installed in editable mode
 	toxEditableRe = regexp.MustCompile(`^-e (?:/|\.|file:|[A-Za-z]:[\\/])`)
 	// tox 4 actions that install nothing in their environment: after the listing they leave it whole
@@ -929,7 +933,7 @@ func countTox(text string) int {
 // ran records a tox environment that ran; it needs a listing.
 func (s *section) ran(env string) {
 	if s.toxEnv == nil {
-		s.toxEnv, s.toxWait = map[string]bool{}, map[string]bool{}
+		s.toxEnv, s.toxWait, s.toxBad = map[string]bool{}, map[string]bool{}, map[string]bool{}
 	}
 	if _, ok := s.toxEnv[env]; !ok {
 		s.toxEnv[env] = false
@@ -942,6 +946,9 @@ func (s *section) ran(env string) {
 func (l *Log) toxLine(s *section, line string, n int) bool {
 	if m := toxActRe.FindStringSubmatch(line); m != nil {
 		env, act, cmd := m[1], m[3], m[4]
+		if m[2] != "" {
+			cmd = toxSrcRe.ReplaceAllString(cmd, "")
+		}
 		cmds := strings.HasPrefix(act, "commands")
 		if !s.tox && s.toxEnv == nil && !cmds && !toxReadOnly[act] && act != "venv" && !strings.HasPrefix(act, "install_") {
 			return false
@@ -952,10 +959,10 @@ func (l *Log) toxLine(s *section, line string, n int) bool {
 		case act == "exit": // tox -vv and failures: the end of a command, not a new one
 		case act == "freeze":
 			s.toxWait[env], s.toxSetup = true, true
-		case cmds:
-			if m[2] != "" {
-				cmd = toxSrcRe.ReplaceAllString(cmd, "")
+			if !toxFreezeRe.MatchString(strings.TrimSpace(cmd)) {
+				s.toxBad[env] = true // a custom list_dependencies_command may leave packages out
 			}
+		case cmds:
 			s.toxCmds = append(s.toxCmds, cmd)
 			delete(s.toxWait, env)
 			s.toxSetup = false
@@ -964,6 +971,9 @@ func (l *Log) toxLine(s *section, line string, n int) bool {
 			s.toxSetup = true
 			if !toxReadOnly[act] {
 				s.toxEnv[env] = false // installs after the listing: not in it
+			}
+			if act == "install_package" && !wheelOnly(cmd) {
+				s.toxBad[env] = true // built from an sdist or a directory in a build env no listing shows
 			}
 		}
 		return true
@@ -977,6 +987,7 @@ func (l *Log) toxLine(s *section, line string, n int) bool {
 	if m := tox3Re.FindStringSubmatch(line); m != nil {
 		env, act, rest := m[1], m[2], m[3]
 		s.ran(env)
+		s.toxBad[env] = true // tox 3 lists with plain pip freeze (no pip, setuptools, wheel) and builds an sdist
 		l.Calls = true
 		switch act {
 		case "installed":
@@ -1034,4 +1045,27 @@ func (l *Log) toxListing(list string, n int, line string) bool {
 		ok = false
 	}
 	return ok
+}
+
+// wheelOnly reports whether a tox install_package command installs only wheel files: no sdist,
+// directory or editable install, each of which builds in an environment no listing shows.
+func wheelOnly(cmd string) bool {
+	f := strings.Fields(cmd)
+	i := slices.Index(f, "install")
+	if i < 0 {
+		return false
+	}
+	n := 0
+	for _, a := range f[i+1:] {
+		switch {
+		case a == "-e" || strings.HasPrefix(a, "--editable"):
+			return false
+		case strings.HasPrefix(a, "-"):
+		case strings.HasSuffix(strings.Trim(a, `'"`), ".whl"):
+			n++
+		default:
+			return false
+		}
+	}
+	return n > 0
 }

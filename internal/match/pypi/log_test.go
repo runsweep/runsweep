@@ -573,18 +573,20 @@ func TestParseLogToxExcerpts(t *testing.T) {
 		opaque     string
 		want       map[string]string
 	}{
-		// tox 4 + tox-uv, an sdist given with --installpkg, an empty listing (.pkg_external)
-		{"tox4-pytest.log", "tox run", true, "", map[string]string{"argcomplete": "3.7.2", "numpy": "2.2.6",
+		// tox 4 + tox-uv, an empty listing (.pkg_external); the sdist given with --installpkg is built
+		// in an isolated env whose build dependencies no listing shows: not complete
+		{"tox4-pytest.log", "tox run", false, "tox", map[string]string{"argcomplete": "3.7.2", "numpy": "2.2.6",
 			"setuptools-scm": "10.3.4", "vcs-versioning": "2.6", "pytest": "9.2.dev384+g6ffc6b4d1"}},
 		// tox 4 + pip, build hooks of .pkg after its listing
 		{"tox4-setuptools.log", "tox -e diffcov", true, "", map[string]string{"diff-cover": "10.6", "configupdater": "3.2", "pip": "26.2.1"}},
 		// pip install -e in tox commands builds the project: its build dependencies are not listed
 		{"tox4-black.log", "tox -e fuzz", false, "", map[string]string{"hypothesmith": "0.3.3", "aiohttp": "3.14.5"}},
-		// tox -vv: listings read, but uv shows it builds an sdist whose build dependencies no listing shows
-		{"tox4-build-vv.log", "tox -vv", false, "", map[string]string{"flit-core": "4.1", "furo": "2025.12.19"}},
+		// tox -vv: listings read, but the package is an sdist (uv shows it building it)
+		{"tox4-build-vv.log", "tox -vv", false, "tox", map[string]string{"flit-core": "4.1", "furo": "2025.12.19"}},
 		// a command in tox that installs without a list
 		{"tox4-build-vv.log", "tox -e docs", false, "uv tool run", nil},
-		{"tox3-synthetic.log", "tox -e py38", true, "", map[string]string{"six": "1.16", "pytest": "8.1.1", "demo": "0.1"}},
+		// tox 3 lists with plain pip freeze (pip, setuptools, wheel left out) and builds an sdist: never complete
+		{"tox3-synthetic.log", "tox -e py38", false, "tox", map[string]string{"six": "1.16", "pytest": "8.1.1", "demo": "0.1"}},
 	} {
 		l := ParseLog(read(c.file))
 		s := pySection(t, l, c.step)
@@ -608,10 +610,10 @@ func TestParseLogToxExcerpts(t *testing.T) {
 			t.Errorf("numpy evidence: %+v", in)
 		}
 	}
-	// tox -vv without the sdist build line: every environment listed, complete
-	vv := strings.Join(slices.DeleteFunc(strings.Split(read("tox4-build-vv.log"), "\n"), func(s string) bool {
-		return strings.Contains(s, "Building build @")
-	}), "\n")
+	// tox -vv with the package installed from a wheel instead: every environment listed, complete
+	vv := strings.ReplaceAll(read("tox4-build-vv.log"), "build@/home/runner/work/build/build/.tox/.tmp/package/1/build-1.6.1.tar.gz",
+		"/home/runner/work/build/build/.tox/.tmp/package/1/build-1.6.1-py3-none-any.whl")
+	vv = strings.Join(slices.DeleteFunc(strings.Split(vv, "\n"), func(s string) bool { return strings.Contains(s, "Building build @") }), "\n")
 	if s := pySection(t, ParseLog(vv), "tox -vv"); !s.Complete {
 		t.Errorf("tox -vv listed: %+v", s)
 	}
@@ -630,8 +632,8 @@ func TestParseLogTox(t *testing.T) {
 		"listed":               {step("tox -e py", listed...), true, ""},
 		"tox -v":               {step("tox -v -e py", listed...), true, ""},
 		"python -m tox":        {step("python -m tox -e py", listed...), true, ""},
-		"empty listing":        {step("tox -e py", slices.Concat(listed, []string{"lint: freeze> pip freeze", "lint: ", "lint: OK"})...), true, ""},
-		"local project":        {step("tox -e py", with(3, "py: freeze> pip freeze", "py: -e /home/runner/work/a/a,demo @ file:///home/runner/work/a/a")...), true, ""},
+		"empty listing":        {step("tox -e py", slices.Concat(listed, []string{"lint: freeze> python -m pip freeze --all", "lint: ", "lint: OK"})...), true, ""},
+		"local project":        {step("tox -e py", with(3, "py: freeze> python -m pip freeze --all", "py: -e /home/runner/work/a/a,demo @ file:///home/runner/work/a/a")...), true, ""},
 		"make runs tox listed": {step("make test", listed...), true, ""},
 		"orphan tox killed":    {step("tox -e py", slices.Concat(listed, []string{"Cleaning up orphan processes", "Terminate orphan process: pid (2127) (tox)"})...), true, ""},
 		"no listing":           {step("tox -e py", without(2)...), false, "tox"},
@@ -645,10 +647,10 @@ func TestParseLogTox(t *testing.T) {
 		"redirected":           {step("tox -e py > tox.log", listed...), false, "tox"},
 		"piped":                {step("tox -e py | tail -n 20", listed...), false, "tox"},
 		"TOX_QUIET":            {step("TOX_QUIET=1 tox -e py", listed...), false, "tox"},
-		"unknown entry url":    {step("tox -e py", with(3, "py: freeze> pip freeze", "py: a==1,b @ https://example.com/b-1.whl")...), false, "tox"},
-		"unknown entry ===":    {step("tox -e py", with(3, "py: freeze> pip freeze", "py: a===1")...), false, "tox"},
-		"unknown entry vcs":    {step("tox -e py", with(3, "py: freeze> pip freeze", "py: -e git+https://example.com/a.git@0abc#egg=a")...), false, "tox"},
-		"unknown entry text":   {step("tox -e py", with(3, "py: freeze> pip freeze", "py: something went wrong")...), false, "tox"},
+		"unknown entry url":    {step("tox -e py", with(3, "py: freeze> python -m pip freeze --all", "py: a==1,b @ https://example.com/b-1.whl")...), false, "tox"},
+		"unknown entry ===":    {step("tox -e py", with(3, "py: freeze> python -m pip freeze --all", "py: a===1")...), false, "tox"},
+		"unknown entry vcs":    {step("tox -e py", with(3, "py: freeze> python -m pip freeze --all", "py: -e git+https://example.com/a.git@0abc#egg=a")...), false, "tox"},
+		"unknown entry text":   {step("tox -e py", with(3, "py: freeze> python -m pip freeze --all", "py: something went wrong")...), false, "tox"},
 		"quiet pip in cmds":    {step("tox -e py", with(4, "py: commands[1]> python -m pip install -q extra")...), false, ""},
 		"pip in cmds listed":   {step("tox -e py", with(4, "py: commands[1]> python -m pip install extra", "Successfully installed extra-1.0")...), true, ""},
 		"opaque in cmds":       {step("tox -e py", with(4, "py: commands[1]> pre-commit run --all-files")...), false, "pre-commit"},
@@ -656,7 +658,28 @@ func TestParseLogTox(t *testing.T) {
 		"uvx tox":              {step("uvx tox -e py", listed...), false, "uvx"},
 		"tox3 no listing":      {step("tox -e py38", "py38 installdeps: pytest", "py38 run-test: commands[0] | pytest", "  py38: commands succeeded"), false, "tox"},
 		"tox3 inst after":      {step("tox -e py38", "py38 installed: pytest==8.1.1", "py38 inst: /x/a-1.zip", "  py38: commands succeeded"), false, "tox"},
-		"tox3 quiet pip":       {step("tox -e py38", "py38 installed: pytest==8.1.1", "py38 run-test: commands[0] | pip install -q x", "  py38: commands succeeded"), false, ""},
+		"tox3 quiet pip":       {step("tox -e py38", "py38 installed: pytest==8.1.1", "py38 run-test: commands[0] | pip install -q x", "  py38: commands succeeded"), false, "tox"},
+		// review C2: a package built from an sdist or installed editable: its build env is not listed
+		"sdist package": {step("tox -e py", with(3, "py: install_package> python -I -m pip install --force-reinstall --no-deps /w/.tox/.tmp/package/1/a-1.0.tar.gz",
+			"py: freeze> python -m pip freeze --all", "py: a @ file:///w/.tox/.tmp/package/1/a-1.0.tar.gz,pytest==8.0.0")...), false, "tox"},
+		"uv sdist package":  {step("tox -e py", with(1, "py: install_package> /x/uv pip install --reinstall --no-deps a@/w/dist/a-1.0.tar.gz")...), false, "tox"},
+		"editable package":  {step("tox -e py", with(1, "py: install_package> python -I -m pip install --no-deps -e /w")...), false, "tox"},
+		"directory package": {step("tox -e py", with(1, "py: install_package> python -I -m pip install --no-deps /w")...), false, "tox"},
+		"wheel package":     {step("tox -e py", with(1, "py: install_package> python -I -m pip install --force-reinstall --no-deps /w/.tox/.tmp/package/1/a-1.0-py3-none-any.whl")...), true, ""},
+		"tox3 sdist inst": {step("tox -e py38", "py38 installdeps: pytest", "py38 inst: /w/.tox/.tmp/package/1/a-1.zip",
+			"py38 installed: a @ file:///w/.tox/.tmp/package/1/a-1.zip,pytest==8.1.1", "py38 run-test: commands[0] | pytest", "  py38: commands succeeded"), false, "tox"},
+		// review C3: only tox's default freeze commands are trusted
+		"freeze no --all":      {step("tox -e py", "py: install_deps> python -I -m pip install setuptools==99 pytest", "py: freeze> python -m pip freeze", "py: pytest==8.0.0", "py: commands[0]> pytest", "  py: OK"), false, "tox"},
+		"freeze custom":        {step("tox -e py", "py: install_deps> python -I -m pip install evil pytest", "py: freeze> echo pytest==8.0.0", "py: pytest==8.0.0", "py: commands[0]> pytest", "  py: OK"), false, "tox"},
+		"freeze exclude":       {step("tox -e py", "py: install_deps> python -I -m pip install x pytest", "py: freeze> python -m pip freeze --all --exclude x", "py: pytest==8.0.0", "  py: OK"), false, "tox"},
+		"uv freeze":            {step("tox -e py", "py: install_deps> /h/.local/share/uv/tools/tox/bin/uv pip install pytest", "py: freeze> /h/.local/share/uv/tools/tox/bin/uv --color never pip freeze", "py: pytest==8.0.0", "  py: OK"), true, ""},
+		"uv.exe freeze":        {step("tox -e py", `py: freeze> D:\a\_temp\uv-tool-dir\tox\Scripts\uv.exe --color never pip freeze`, "py: pytest==8.0.0", "  py: OK"), true, ""},
+		"tox3 deps setuptools": {step("tox -e py38", "py38 installdeps: setuptools==99, pytest", "py38 installed: pytest==8.1.1", "py38 run-test: commands[0] | pytest", "  py38: commands succeeded"), false, "tox"},
+		// review I3: env names with ':' or non-ASCII letters
+		"env colon name":     {step("tox -e py", slices.Concat(listed[:4], []string{"docs:html: install_deps> python -I -m pip install sphinx", "docs:html: commands[0]> sphinx-build", "  py: OK", "  docs:html: OK"})...), false, "tox"},
+		"env unicode name":   {step("tox -e py", slices.Concat(listed[:4], []string{"pÿ: install_deps> python -I -m pip install sphinx", "  py: OK", "  pÿ: OK"})...), false, "tox"},
+		"env colon listed":   {step("tox -e docs:html", "docs:html: install_deps> python -I -m pip install sphinx", "docs:html: freeze> python -m pip freeze --all", "docs:html: sphinx==9.1.0", "docs:html: commands[0]> sphinx-build", "  docs:html: OK"), true, ""},
+		"env unicode listed": {step("tox -e pÿ", "pÿ: install_deps> python -I -m pip install sphinx", "pÿ: freeze> python -m pip freeze --all", "pÿ: sphinx==9.1.0", "  pÿ: OK"), true, ""},
 	} {
 		l := ParseLog(c.log)
 		var py []Section
@@ -675,7 +698,7 @@ func TestParseLogTox(t *testing.T) {
 		t.Errorf("uvx tox installs: %+v", l.Installs)
 	}
 	// an entry that is not name==version is unparsed, named for the incident check
-	l = ParseLog(step("tox -e py", with(3, "py: freeze> pip freeze", "py: six @ https://example.com/six-1.whl")...))
+	l = ParseLog(step("tox -e py", with(3, "py: freeze> python -m pip freeze --all", "py: six @ https://example.com/six-1.whl")...))
 	if len(l.Unparsed) != 1 || l.Unparsed[0].Name != "six" {
 		t.Errorf("unparsed: %+v", l.Unparsed)
 	}
