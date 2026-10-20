@@ -106,6 +106,9 @@ func (c *Client) QueryMAL(ctx context.Context, ecosystem, name string) ([]Vuln, 
 	default:
 		return nil, fmt.Errorf("unsupported ecosystem %q", ecosystem)
 	}
+	if ecosystem == "PyPI" {
+		name = pep.Name(name) // OSV keys PyPI records by the PEP 503 name
+	}
 	var out []Vuln
 	token := ""
 	for page := 0; page < maxPages; page++ {
