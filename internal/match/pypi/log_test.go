@@ -110,14 +110,15 @@ func TestParseLogRealExcerpts(t *testing.T) {
 		}
 		return ParseLog(string(b))
 	}
-	// uv run prints only a count: its section exists, is opaque and not complete
+	// uv run prints only a count: its section exists and is not complete, though tox listed its environment
 	var uvRun []Section
-	for _, s := range read("flask-uv-run.log").Sections {
+	fl := read("flask-uv-run.log")
+	for _, s := range fl.Sections {
 		if strings.Contains(s.Cmd, "uv run") {
 			uvRun = append(uvRun, s)
 		}
 	}
-	if len(uvRun) != 1 || uvRun[0].Opaque == "" || uvRun[0].Complete {
+	if len(uvRun) != 1 || uvRun[0].Complete || installs(fl)["itsdangerous"] != "2.2" {
 		t.Errorf("flask uv run: %+v", uvRun)
 	}
 	// uv with 15 + lines: that exact section is Python and complete
@@ -540,5 +541,141 @@ func TestParseLogDemoExcerpts(t *testing.T) {
 		if installs(l)["six"] != "1.17" {
 			t.Errorf("%s: %v", n, installs(l))
 		}
+	}
+}
+
+// pySection returns the only Python section whose command starts with prefix.
+func pySection(t *testing.T, l Log, prefix string) Section {
+	t.Helper()
+	var out []Section
+	for _, s := range l.Sections {
+		if strings.HasPrefix(s.Cmd, prefix) {
+			out = append(out, s)
+		}
+	}
+	if len(out) != 1 || !out[0].Python {
+		t.Fatalf("%q: %+v", prefix, out)
+	}
+	return out[0]
+}
+
+func TestParseLogToxExcerpts(t *testing.T) {
+	read := func(n string) string {
+		b, err := os.ReadFile("testdata/logs/" + n) //nolint:gosec // G304: test fixture path
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	for _, c := range []struct {
+		file, step string
+		complete   bool
+		opaque     string
+		want       map[string]string
+	}{
+		// tox 4 + tox-uv, an sdist given with --installpkg, an empty listing (.pkg_external)
+		{"tox4-pytest.log", "tox run", true, "", map[string]string{"argcomplete": "3.7.2", "numpy": "2.2.6",
+			"setuptools-scm": "10.3.4", "vcs-versioning": "2.6", "pytest": "9.2.dev384+g6ffc6b4d1"}},
+		// tox 4 + pip, build hooks of .pkg after its listing
+		{"tox4-setuptools.log", "tox -e diffcov", true, "", map[string]string{"diff-cover": "10.6", "configupdater": "3.2", "pip": "26.2.1"}},
+		// pip install -e in tox commands builds the project: its build dependencies are not listed
+		{"tox4-black.log", "tox -e fuzz", false, "", map[string]string{"hypothesmith": "0.3.3", "aiohttp": "3.14.5"}},
+		// tox -vv: listings read, but uv shows it builds an sdist whose build dependencies no listing shows
+		{"tox4-build-vv.log", "tox -vv", false, "", map[string]string{"flit-core": "4.1", "furo": "2025.12.19"}},
+		// a command in tox that installs without a list
+		{"tox4-build-vv.log", "tox -e docs", false, "uv tool run", nil},
+		{"tox3-synthetic.log", "tox -e py38", true, "", map[string]string{"six": "1.16", "pytest": "8.1.1", "demo": "0.1"}},
+	} {
+		l := ParseLog(read(c.file))
+		s := pySection(t, l, c.step)
+		if s.Complete != c.complete || s.Opaque != c.opaque {
+			t.Errorf("%s %s: %+v", c.file, c.step, s)
+		}
+		got := installs(l)
+		for n, v := range c.want {
+			if got[n] != v {
+				t.Errorf("%s: %s = %q, want %q", c.file, n, got[n], v)
+			}
+		}
+		if len(l.Unparsed) != 0 {
+			t.Errorf("%s: unparsed %+v", c.file, l.Unparsed)
+		}
+	}
+	// the listing line is the evidence
+	l := ParseLog(read("tox4-pytest.log"))
+	for _, in := range l.Installs {
+		if in.Name == "numpy" && !strings.HasPrefix(in.Text, "py310-xdist: argcomplete==") {
+			t.Errorf("numpy evidence: %+v", in)
+		}
+	}
+	// tox -vv without the sdist build line: every environment listed, complete
+	vv := strings.Join(slices.DeleteFunc(strings.Split(read("tox4-build-vv.log"), "\n"), func(s string) bool {
+		return strings.Contains(s, "Building build @")
+	}), "\n")
+	if s := pySection(t, ParseLog(vv), "tox -vv"); !s.Complete {
+		t.Errorf("tox -vv listed: %+v", s)
+	}
+}
+
+func TestParseLogTox(t *testing.T) {
+	listed := []string{"py: install_deps> python -I -m pip install pytest", "py: freeze> python -m pip freeze --all",
+		"py: pytest==8.0.0,six==1.17.0", "py: commands[0]> pytest", "  py: OK (1.00=setup[0.50]+cmd[0.50] seconds)"}
+	with := func(i int, l ...string) []string { return slices.Concat(listed[:i], l, listed[i:]) }
+	without := func(i int) []string { return slices.Delete(slices.Clone(listed), i, i+1) }
+	for name, c := range map[string]struct {
+		log      string
+		complete bool
+		opaque   string
+	}{
+		"listed":               {step("tox -e py", listed...), true, ""},
+		"tox -v":               {step("tox -v -e py", listed...), true, ""},
+		"python -m tox":        {step("python -m tox -e py", listed...), true, ""},
+		"empty listing":        {step("tox -e py", slices.Concat(listed, []string{"lint: freeze> pip freeze", "lint: ", "lint: OK"})...), true, ""},
+		"local project":        {step("tox -e py", with(3, "py: freeze> pip freeze", "py: -e /home/runner/work/a/a,demo @ file:///home/runner/work/a/a")...), true, ""},
+		"make runs tox listed": {step("make test", listed...), true, ""},
+		"no listing":           {step("tox -e py", without(2)...), false, "tox"},
+		"no freeze":            {step("tox -e py", without(1)...), false, "tox"},
+		"listing late":         {step("tox -e py", slices.Concat(listed[:2], []string{"py: commands[0]> pytest"}, listed[2:])...), false, "tox"},
+		"env with no listing":  {step("tox -e py,lint", with(4, "lint: install_deps> python -I -m pip install ruff", "lint: commands[0]> ruff check")...), false, "tox"},
+		"summary only env":     {step("tox", with(5, "  lint: OK (0.1 seconds)")...), false, "tox"},
+		"install after":        {step("tox -e py", with(3, "py: install_package> python -I -m pip install --force-reinstall --no-deps dist/a-1.tar.gz")...), false, "tox"},
+		"quiet":                {step("tox -q -e py", listed...), false, "tox"},
+		"quiet twice":          {step("tox -qq", listed...), false, "tox"},
+		"redirected":           {step("tox -e py > tox.log", listed...), false, "tox"},
+		"piped":                {step("tox -e py | tail -n 20", listed...), false, "tox"},
+		"TOX_QUIET":            {step("TOX_QUIET=1 tox -e py", listed...), false, "tox"},
+		"unknown entry url":    {step("tox -e py", with(3, "py: freeze> pip freeze", "py: a==1,b @ https://example.com/b-1.whl")...), false, "tox"},
+		"unknown entry ===":    {step("tox -e py", with(3, "py: freeze> pip freeze", "py: a===1")...), false, "tox"},
+		"unknown entry vcs":    {step("tox -e py", with(3, "py: freeze> pip freeze", "py: -e git+https://example.com/a.git@0abc#egg=a")...), false, "tox"},
+		"unknown entry text":   {step("tox -e py", with(3, "py: freeze> pip freeze", "py: something went wrong")...), false, "tox"},
+		"quiet pip in cmds":    {step("tox -e py", with(4, "py: commands[1]> python -m pip install -q extra")...), false, ""},
+		"pip in cmds listed":   {step("tox -e py", with(4, "py: commands[1]> python -m pip install extra", "Successfully installed extra-1.0")...), true, ""},
+		"opaque in cmds":       {step("tox -e py", with(4, "py: commands[1]> pre-commit run --all-files")...), false, "pre-commit"},
+		"make runs tox":        {step("make test", without(2)...), false, "tox"},
+		"uvx tox":              {step("uvx tox -e py", listed...), false, "uvx"},
+		"tox3 no listing":      {step("tox -e py38", "py38 installdeps: pytest", "py38 run-test: commands[0] | pytest", "  py38: commands succeeded"), false, "tox"},
+		"tox3 inst after":      {step("tox -e py38", "py38 installed: pytest==8.1.1", "py38 inst: /x/a-1.zip", "  py38: commands succeeded"), false, "tox"},
+		"tox3 quiet pip":       {step("tox -e py38", "py38 installed: pytest==8.1.1", "py38 run-test: commands[0] | pip install -q x", "  py38: commands succeeded"), false, ""},
+	} {
+		l := ParseLog(c.log)
+		var py []Section
+		for _, s := range l.Sections {
+			if s.Python {
+				py = append(py, s)
+			}
+		}
+		if len(py) != 1 || py[0].Complete != c.complete || py[0].Opaque != c.opaque {
+			t.Errorf("%s: %+v", name, py)
+		}
+	}
+	// a listing's versions are installs, whatever the step's verdict
+	l := ParseLog(step("uvx tox -e py", listed...))
+	if installs(l)["six"] != "1.17" || l.Installs[0].Text != "py: pytest==8.0.0,six==1.17.0" {
+		t.Errorf("uvx tox installs: %+v", l.Installs)
+	}
+	// an entry that is not name==version is unparsed, named for the incident check
+	l = ParseLog(step("tox -e py", with(3, "py: freeze> pip freeze", "py: six @ https://example.com/six-1.whl")...))
+	if len(l.Unparsed) != 1 || l.Unparsed[0].Name != "six" {
+		t.Errorf("unparsed: %+v", l.Unparsed)
 	}
 }

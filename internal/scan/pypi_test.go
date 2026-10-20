@@ -2,6 +2,7 @@ package scan
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -211,5 +212,34 @@ func TestScanPyPINoPackages(t *testing.T) {
 		if fd := scanAny(t, f, pypiOnly); fd.Status == model.Clean {
 			t.Errorf("%s: CLEAN (%+v)", name, fd)
 		}
+	}
+}
+
+// TestScanPyPITox: tox is read from its listings.
+func TestScanPyPITox(t *testing.T) {
+	steps := "      - uses: actions/setup-python@v5\n      - run: pip install tox\n      - run: tox -e py\n"
+	head := pyStep("actions/setup-python@v5") + pyStep("pip install tox", "Successfully installed tox-4.66.0 virtualenv-21.14.8")
+	toxLog := func(listing string, more ...string) string {
+		return head + pyStep("tox -e py", slices.Concat([]string{"py: install_deps> python -I -m pip install litellm pytest",
+			"py: freeze> python -m pip freeze --all", "py: " + listing, "py: commands[0]> pytest"}, more, []string{"  py: OK (1.00 seconds)"})...)
+	}
+	for name, c := range map[string]struct {
+		log    string
+		status model.Status
+		note   string
+	}{
+		"listed clean":          {toxLog("litellm==1.82.9,pytest==8.0.0"), model.Clean, ""},
+		"listed bad":            {toxLog("litellm==1.82.8,pytest==8.0.0"), model.Affected, "litellm==1.82.8 in job log"},
+		"bad entry shape":       {toxLog("litellm @ https://example.com/litellm-1.82.8.whl"), model.Unchecked, "unparsed install line for litellm"},
+		"no listing":            {head + pyStep("tox -e py", "py: install_deps> python -I -m pip install litellm", "  py: OK"), model.Unchecked, "Python install output not visible: tox"},
+		"quiet pip in commands": {toxLog("litellm==1.82.9", "py: commands[1]> pip install -q -r extra.txt"), model.Unchecked, "Python install output incomplete in step: tox -e py"},
+	} {
+		if fd := scanAny(t, pyFx(steps, c.log), pypiOnly); fd.Status != c.status || c.note != "" && !hasNote(fd, c.note) && !hasEvidence(fd, c.note) {
+			t.Errorf("%s: %+v", name, fd)
+		}
+	}
+	quiet := pyFx(strings.Replace(steps, "tox -e py", "tox -q -e py", 1), strings.Replace(toxLog("litellm==1.82.9"), "tox -e py", "tox -q -e py", 2))
+	if fd := scanAny(t, quiet, pypiOnly); fd.Status != model.Unchecked {
+		t.Errorf("tox -q: %+v", fd)
 	}
 }

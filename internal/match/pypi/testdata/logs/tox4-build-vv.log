@@ -1,0 +1,122 @@
+2026-10-17T00:35:43.2466831Z ##[group]Run uv tool install tox --with tox-uv
+2026-10-17T00:35:43.2467298Z [36;1muv tool install tox --with tox-uv[0m
+2026-10-17T00:35:43.2641521Z shell: /usr/bin/bash -e {0}
+2026-10-17T00:35:43.2641883Z env:
+2026-10-17T00:35:43.2642182Z   PY_COLORS: 1
+2026-10-17T00:35:43.2642463Z   TOX_PARALLEL_NO_SPINNER: 1
+2026-10-17T00:35:43.2643469Z   UV_PYTHON_INSTALL_DIR: /home/runner/work/_temp/uv-python-dir
+2026-10-17T00:35:43.2643925Z   UV_PYTHON: 3.15
+2026-10-17T00:35:43.2644275Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+2026-10-17T00:35:43.2644690Z ##[endgroup]
+2026-10-17T00:35:43.4966599Z Downloading cpython-3.15.0-linux-x86_64-gnu (download) (35.9MiB)
+2026-10-17T00:35:44.1239316Z  Downloaded cpython-3.15.0-linux-x86_64-gnu (download)
+2026-10-17T00:35:44.4152567Z Resolved 15 packages in 119ms
+2026-10-17T00:35:44.4601884Z Downloading uv (16.5MiB)
+2026-10-17T00:35:44.4631704Z Downloading virtualenv (5.2MiB)
+2026-10-17T00:35:44.5129548Z  Downloaded virtualenv
+2026-10-17T00:35:44.5886417Z  Downloaded uv
+2026-10-17T00:35:44.5888210Z Prepared 12 packages in 172ms
+2026-10-17T00:35:44.5959360Z Installed 15 packages in 6ms
+2026-10-17T00:35:44.5959870Z  + cachetools==7.2.2
+2026-10-17T00:35:44.5960569Z  + colorama==0.4.6
+2026-10-17T00:35:44.5960956Z  + distlib==0.4.4
+2026-10-17T00:35:44.5961328Z  + filelock==4.2.0
+2026-10-17T00:35:44.5961736Z  + packaging==26.3
+2026-10-17T00:35:44.5962155Z  + platformdirs==4.13.3
+2026-10-17T00:35:44.5962644Z  + pluggy==1.7.0
+2026-10-17T00:35:44.5963256Z  + pyproject-api==1.11.7
+2026-10-17T00:35:44.5963755Z  + python-discovery==1.6.3
+2026-10-17T00:35:44.5964166Z  + tomli-w==1.2.0
+2026-10-17T00:35:44.5964500Z  + tox==4.66.0
+2026-10-17T00:35:44.5964877Z  + tox-uv==1.37.0
+2026-10-17T00:35:44.5965271Z  + tox-uv-bare==1.37.0
+2026-10-17T00:35:44.5965640Z  + uv==0.13.1
+2026-10-17T00:35:44.5966060Z  + virtualenv==21.14.8
+2026-10-17T00:35:44.5973962Z Installed 1 executable: tox
+2026-10-17T00:35:44.6081152Z ##[group]Run tox -vv --notest -e docs
+2026-10-17T00:35:44.6081513Z [36;1mtox -vv --notest -e docs[0m
+2026-10-17T00:35:44.6139792Z shell: /usr/bin/bash -e {0}
+2026-10-17T00:35:44.6140050Z env:
+2026-10-17T00:35:44.6140247Z   PY_COLORS: 1
+2026-10-17T00:35:44.6140468Z   TOX_PARALLEL_NO_SPINNER: 1
+2026-10-17T00:35:44.6140808Z   UV_PYTHON_INSTALL_DIR: /home/runner/work/_temp/uv-python-dir
+2026-10-17T00:35:44.6141181Z   UV_PYTHON: 3.15
+2026-10-17T00:35:44.6141442Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+2026-10-17T00:35:44.6141749Z ##[endgroup]
+2026-10-17T00:35:45.4815051Z ROOT: 727 D setup logging to DEBUG on pid 2594 [tox/report.py:249]
+2026-10-17T00:35:45.4845390Z ROOT: 730 I TomlPyProject skipped loading /home/runner/work/build/build/pyproject.toml due to /home/runner/work/build/build/pyproject.toml [tox/config/source/discover.py:74]
+2026-10-17T00:35:45.4858582Z ROOT: 731 I LegacyToml skipped loading /home/runner/work/build/build/pyproject.toml due to `tool.tox.legacy_tox_ini` missing from /home/runner/work/build/build/pyproject.toml [tox/config/source/discover.py:74]
+2026-10-17T00:35:45.5435617Z docs: 789 D using bundled uv from: /home/runner/.local/share/uv/tools/tox/bin/uv [tox_uv/_venv.py:237]
+2026-10-17T00:35:45.5445741Z .pkg: 790 D using bundled uv from: /home/runner/.local/share/uv/tools/tox/bin/uv [tox_uv/_venv.py:237]
+2026-10-17T00:35:45.5502674Z fix: 796 D using bundled uv from: /home/runner/.local/share/uv/tools/tox/bin/uv [tox_uv/_venv.py:237]
+2026-10-17T00:35:45.5514300Z path: 797 D using bundled uv from: /home/runner/.local/share/uv/tools/tox/bin/uv [tox_uv/_venv.py:237]
+2026-10-17T00:35:45.5528249Z type: 798 D using bundled uv from: /home/runner/.local/share/uv/tools/tox/bin/uv [tox_uv/_venv.py:237]
+2026-10-17T00:35:45.5542888Z 3.11: 800 D using bundled uv from: /home/runner/.local/share/uv/tools/tox/bin/uv [tox_uv/_venv.py:237]
+2026-10-17T00:35:45.5555760Z 3.12: 801 D using bundled uv from: /home/runner/.local/share/uv/tools/tox/bin/uv [tox_uv/_venv.py:237]
+2026-10-17T00:35:45.5568216Z 3.13: 802 D using bundled uv from: /home/runner/.local/share/uv/tools/tox/bin/uv [tox_uv/_venv.py:237]
+2026-10-17T00:35:45.5580598Z 3.14: 804 D using bundled uv from: /home/runner/.local/share/uv/tools/tox/bin/uv [tox_uv/_venv.py:237]
+2026-10-17T00:35:45.5593215Z 3.15: 805 D using bundled uv from: /home/runner/.local/share/uv/tools/tox/bin/uv [tox_uv/_venv.py:237]
+2026-10-17T00:35:45.5606015Z pypy3.11: 806 D using bundled uv from: /home/runner/.local/share/uv/tools/tox/bin/uv [tox_uv/_venv.py:237]
+2026-10-17T00:35:45.5618385Z pypy3.12: 807 D using bundled uv from: /home/runner/.local/share/uv/tools/tox/bin/uv [tox_uv/_venv.py:237]
+2026-10-17T00:35:45.5632562Z min-3.11: 809 D using bundled uv from: /home/runner/.local/share/uv/tools/tox/bin/uv [tox_uv/_venv.py:237]
+2026-10-17T00:35:45.5646270Z min-3.12: 810 D using bundled uv from: /home/runner/.local/share/uv/tools/tox/bin/uv [tox_uv/_venv.py:237]
+2026-10-17T00:35:45.5659258Z min-3.13: 811 D using bundled uv from: /home/runner/.local/share/uv/tools/tox/bin/uv [tox_uv/_venv.py:237]
+2026-10-17T00:35:45.5672211Z min-3.14: 813 D using bundled uv from: /home/runner/.local/share/uv/tools/tox/bin/uv [tox_uv/_venv.py:237]
+2026-10-17T00:35:45.5685064Z min-3.15: 814 D using bundled uv from: /home/runner/.local/share/uv/tools/tox/bin/uv [tox_uv/_venv.py:237]
+2026-10-17T00:35:45.5697787Z min-pypy3.11: 815 D using bundled uv from: /home/runner/.local/share/uv/tools/tox/bin/uv [tox_uv/_venv.py:237]
+2026-10-17T00:35:45.5739392Z min-pypy3.12: 819 D using bundled uv from: /home/runner/.local/share/uv/tools/tox/bin/uv [tox_uv/_venv.py:237]
+2026-10-17T00:35:45.5752475Z bump: 821 D using bundled uv from: /home/runner/.local/share/uv/tools/tox/bin/uv [tox_uv/_venv.py:237]
+2026-10-17T00:35:45.5761695Z coverage: 822 D using bundled uv from: /home/runner/.local/share/uv/tools/tox/bin/uv [tox_uv/_venv.py:237]
+2026-10-17T00:35:45.5770630Z dev: 823 D using bundled uv from: /home/runner/.local/share/uv/tools/tox/bin/uv [tox_uv/_venv.py:237]
+2026-10-17T00:35:45.5792609Z release: 825 D using bundled uv from: /home/runner/.local/share/uv/tools/tox/bin/uv [tox_uv/_venv.py:237]
+2026-10-17T00:35:45.5841841Z docs: 830 W venv> /home/runner/.local/share/uv/tools/tox/bin/uv venv -p cpython3.15 --allow-existing '--prompt=build[docs]' -v --seed --python-preference system /home/runner/work/build/build/.tox/docs [tox/tox_env/api.py:508]
+2026-10-17T00:35:45.6976548Z docs: 943 I exit 0 (0.11 seconds) /home/runner/work/build/build> /home/runner/.local/share/uv/tools/tox/bin/uv venv -p cpython3.15 --allow-existing '--prompt=build[docs]' -v --seed --python-preference system /home/runner/work/build/build/.tox/docs pid=2600 [tox/execute/api.py:347]
+2026-10-17T00:35:45.7018686Z docs: 947 W install_dependency-groups> /home/runner/.local/share/uv/tools/tox/bin/uv pip install 'furo>=2025.12.19' 'pre-commit>=3' 'sphinx-argparse-cli>=1.17' 'sphinx-autodoc-typehints>=2.3' 'sphinx-copybutton>=0.5.2' 'sphinx-inline-tabs>=2025.12.21' 'sphinx-issues>=5' 'sphinx>=8.1' 'sphinxcontrib-mermaid>=2' 'towncrier>=24.8' 'uv>=0.12.22' -v [tox/tox_env/api.py:508]
+2026-10-17T00:35:55.2054803Z docs: 10451 I exit 0 (9.50 seconds) /home/runner/work/build/build> /home/runner/.local/share/uv/tools/tox/bin/uv pip install 'furo>=2025.12.19' 'pre-commit>=3' 'sphinx-argparse-cli>=1.17' 'sphinx-autodoc-typehints>=2.3' 'sphinx-copybutton>=0.5.2' 'sphinx-inline-tabs>=2025.12.21' 'sphinx-issues>=5' 'sphinx>=8.1' 'sphinxcontrib-mermaid>=2' 'towncrier>=24.8' 'uv>=0.12.22' -v pid=2638 [tox/execute/api.py:347]
+2026-10-17T00:35:55.2093742Z .pkg: 10455 W venv> /home/runner/.local/share/uv/tools/tox/bin/uv venv -p cpython3.15 --allow-existing '--prompt=build[.pkg]' -v --python-preference system /home/runner/work/build/build/.tox/.pkg [tox/tox_env/api.py:508]
+2026-10-17T00:35:55.2210808Z .pkg: 10467 I exit 0 (0.01 seconds) /home/runner/work/build/build> /home/runner/.local/share/uv/tools/tox/bin/uv venv -p cpython3.15 --allow-existing '--prompt=build[.pkg]' -v --python-preference system /home/runner/work/build/build/.tox/.pkg pid=2977 [tox/execute/api.py:347]
+2026-10-17T00:35:55.2258600Z .pkg: 10471 W install_requires> /home/runner/.local/share/uv/tools/tox/bin/uv pip install 'flit-core>=3.11' -v [tox/tox_env/api.py:508]
+2026-10-17T00:35:55.3460552Z .pkg: 10592 I exit 0 (0.12 seconds) /home/runner/work/build/build> /home/runner/.local/share/uv/tools/tox/bin/uv pip install 'flit-core>=3.11' -v pid=2997 [tox/execute/api.py:347]
+2026-10-17T00:35:55.3473541Z .pkg: 10593 W _optional_hooks> python /home/runner/.local/share/uv/tools/tox/lib/python3.15/site-packages/pyproject_api/_backend.py True flit_core.buildapi [tox/tox_env/api.py:508]
+2026-10-17T00:35:55.4309149Z .pkg: 10676 I exit None (0.08 seconds) /home/runner/work/build/build> python /home/runner/.local/share/uv/tools/tox/lib/python3.15/site-packages/pyproject_api/_backend.py True flit_core.buildapi pid=3030 [tox/execute/api.py:347]
+2026-10-17T00:35:55.4313332Z .pkg: 10677 W get_requires_for_build_sdist> python /home/runner/.local/share/uv/tools/tox/lib/python3.15/site-packages/pyproject_api/_backend.py True flit_core.buildapi [tox/tox_env/api.py:508]
+2026-10-17T00:35:55.4406753Z .pkg: 10686 I exit None (0.01 seconds) /home/runner/work/build/build> python /home/runner/.local/share/uv/tools/tox/lib/python3.15/site-packages/pyproject_api/_backend.py True flit_core.buildapi pid=3030 [tox/execute/api.py:347]
+2026-10-17T00:35:55.4417502Z .pkg: 10687 W get_requires_for_build_editable> python /home/runner/.local/share/uv/tools/tox/lib/python3.15/site-packages/pyproject_api/_backend.py True flit_core.buildapi [tox/tox_env/api.py:508]
+2026-10-17T00:35:55.4457005Z .pkg: 10691 I exit None (0.00 seconds) /home/runner/work/build/build> python /home/runner/.local/share/uv/tools/tox/lib/python3.15/site-packages/pyproject_api/_backend.py True flit_core.buildapi pid=3030 [tox/execute/api.py:347]
+2026-10-17T00:35:55.4464602Z .pkg: 10692 W freeze> /home/runner/.local/share/uv/tools/tox/bin/uv --color never pip freeze [tox/tox_env/api.py:508]
+2026-10-17T00:35:55.4549638Z .pkg: 10700 I exit 0 (0.01 seconds) /home/runner/work/build/build> /home/runner/.local/share/uv/tools/tox/bin/uv --color never pip freeze pid=3040 [tox/execute/api.py:347]
+2026-10-17T00:35:55.4551129Z .pkg: 10701 W flit-core==4.1.0 [tox/tox_env/python/api.py:395]
+2026-10-17T00:35:55.4553423Z .pkg: 10701 W build_sdist> python /home/runner/.local/share/uv/tools/tox/lib/python3.15/site-packages/pyproject_api/_backend.py True flit_core.buildapi [tox/tox_env/api.py:508]
+2026-10-17T00:35:55.4909400Z .pkg: 10736 I exit None (0.04 seconds) /home/runner/work/build/build> python /home/runner/.local/share/uv/tools/tox/lib/python3.15/site-packages/pyproject_api/_backend.py True flit_core.buildapi pid=3030 [tox/execute/api.py:347]
+2026-10-17T00:35:55.4914816Z .pkg: 10737 D package .tmp/package/1/build-1.6.1.tar.gz copied to .pkg/dist/build-1.6.1.tar.gz (/home/runner/work/build/build/.tox) [tox/util/file_view.py:33]
+2026-10-17T00:35:55.4933402Z docs: 10739 W install_package_deps> /home/runner/.local/share/uv/tools/tox/bin/uv pip install 'backports-tarfile>=1.2; python_version == "3.11" and python_full_version < "3.11.5"' 'colorama; os_name == "nt"' 'packaging>=24' pyproject-hooks -v [tox/tox_env/api.py:508]
+2026-10-17T00:35:55.5550329Z docs: 10801 I exit 0 (0.06 seconds) /home/runner/work/build/build> /home/runner/.local/share/uv/tools/tox/bin/uv pip install 'backports-tarfile>=1.2; python_version == "3.11" and python_full_version < "3.11.5"' 'colorama; os_name == "nt"' 'packaging>=24' pyproject-hooks -v pid=3050 [tox/execute/api.py:347]
+2026-10-17T00:35:55.5554923Z docs: 10801 W install_package> /home/runner/.local/share/uv/tools/tox/bin/uv pip install --reinstall --no-deps build@/home/runner/work/build/build/.tox/.tmp/package/1/build-1.6.1.tar.gz -v [tox/tox_env/api.py:508]
+2026-10-17T00:35:55.6176114Z    Building build @ file:///home/runner/work/build/build/.tox/.tmp/package/1/build-1.6.1.tar.gz
+2026-10-17T00:35:55.8346422Z docs: 11080 I exit 0 (0.28 seconds) /home/runner/work/build/build> /home/runner/.local/share/uv/tools/tox/bin/uv pip install --reinstall --no-deps build@/home/runner/work/build/build/.tox/.tmp/package/1/build-1.6.1.tar.gz -v pid=3086 [tox/execute/api.py:347]
+2026-10-17T00:35:55.8348161Z docs: 11080 W freeze> /home/runner/.local/share/uv/tools/tox/bin/uv --color never pip freeze [tox/tox_env/api.py:508]
+2026-10-17T00:35:55.8440177Z docs: 11090 I exit 0 (0.01 seconds) /home/runner/work/build/build> /home/runner/.local/share/uv/tools/tox/bin/uv --color never pip freeze pid=3140 [tox/execute/api.py:347]
+2026-10-17T00:35:55.8448429Z docs: 11090 W accessible-pygments==0.0.5,alabaster==1.0.0,babel==2.18.0,beautifulsoup4==4.15.0,build @ file:///home/runner/work/build/build/.tox/.tmp/package/1/build-1.6.1.tar.gz,certifi==2026.7.22,cfgv==3.5.0,charset-normalizer==3.5.2,click==8.5.0,distlib==0.4.3,docutils==0.22.4,filelock==4.1.0,furo==2025.12.19,identify==2.6.20,idna==3.20,imagesize==2.0.1,jinja2==3.1.6,markupsafe==3.0.4,nodeenv==1.11.0,packaging==26.3,pip==26.2.1,platformdirs==4.12.4,pre-commit==4.6.2,pygments==2.21.0,pyproject-hooks==1.3.3,python-discovery==1.6.1,pyyaml==6.0.3,requests==2.34.2,roman-numerals==4.1.0,snowballstemmer==3.1.1,soupsieve==2.10,sphinx==9.1.0,sphinx-argparse-cli==1.23.0,sphinx-autodoc-typehints==3.13.9,sphinx-basic-ng==1.0.0b2,sphinx-copybutton==0.5.2,sphinx-inline-tabs==2025.12.21.14,sphinx-issues==6.0.0,sphinxcontrib-applehelp==2.0.0,sphinxcontrib-devhelp==2.0.0,sphinxcontrib-htmlhelp==2.1.0,sphinxcontrib-jsmath==1.0.1,sphinxcontrib-mermaid==2.1.1,sphinxcontrib-qthelp==2.0.0,sphinxcontrib-serializinghtml==2.0.0,towncrier==26.9.0,typing-extensions==4.16.0,urllib3==2.8.0,uv==0.13.0,virtualenv==21.14.6 [tox/tox_env/python/api.py:395]
+2026-10-17T00:35:55.8454991Z .pkg: 11091 W _exit> python /home/runner/.local/share/uv/tools/tox/lib/python3.15/site-packages/pyproject_api/_backend.py True flit_core.buildapi [tox/tox_env/api.py:508]
+2026-10-17T00:35:55.8468235Z .pkg: 11092 I exit None (0.00 seconds) /home/runner/work/build/build> python /home/runner/.local/share/uv/tools/tox/lib/python3.15/site-packages/pyproject_api/_backend.py True flit_core.buildapi pid=3030 [tox/execute/api.py:347]
+2026-10-17T00:35:55.8583605Z .pkg: 11104 D delete package /home/runner/work/build/build/.tox/.tmp/package/1/build-1.6.1.tar.gz [tox/tox_env/python/virtual_env/package/pyproject.py:258]
+2026-10-17T00:35:55.8593515Z   docs: OK (10.28 seconds)
+2026-10-17T00:35:55.8593809Z   congratulations :) (10.38 seconds)
+2026-10-17T00:35:55.9044443Z ##[group]Run tox -e docs --skip-pkg-install
+2026-10-17T00:35:55.9044828Z [36;1mtox -e docs --skip-pkg-install[0m
+2026-10-17T00:35:55.9103471Z shell: /usr/bin/bash -e {0}
+2026-10-17T00:35:55.9103740Z env:
+2026-10-17T00:35:55.9103936Z   PY_COLORS: 1
+2026-10-17T00:35:55.9104164Z   TOX_PARALLEL_NO_SPINNER: 1
+2026-10-17T00:35:55.9104492Z   UV_PYTHON_INSTALL_DIR: /home/runner/work/_temp/uv-python-dir
+2026-10-17T00:35:55.9104844Z   UV_PYTHON: 3.15
+2026-10-17T00:35:55.9105308Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+2026-10-17T00:35:55.9105631Z ##[endgroup]
+2026-10-17T00:35:56.1362215Z docs: skip building and installing the package
+2026-10-17T00:35:56.1364768Z docs: freeze> /home/runner/.local/share/uv/tools/tox/bin/uv --color never pip freeze
+2026-10-17T00:35:56.1470291Z docs: accessible-pygments==0.0.5,alabaster==1.0.0,babel==2.18.0,beautifulsoup4==4.15.0,build @ file:///home/runner/work/build/build/.tox/.tmp/package/1/build-1.6.1.tar.gz,certifi==2026.7.22,cfgv==3.5.0,charset-normalizer==3.5.2,click==8.5.0,distlib==0.4.3,docutils==0.22.4,filelock==4.1.0,furo==2025.12.19,identify==2.6.20,idna==3.20,imagesize==2.0.1,jinja2==3.1.6,markupsafe==3.0.4,nodeenv==1.11.0,packaging==26.3,pip==26.2.1,platformdirs==4.12.4,pre-commit==4.6.2,pygments==2.21.0,pyproject-hooks==1.3.3,python-discovery==1.6.1,pyyaml==6.0.3,requests==2.34.2,roman-numerals==4.1.0,snowballstemmer==3.1.1,soupsieve==2.10,sphinx==9.1.0,sphinx-argparse-cli==1.23.0,sphinx-autodoc-typehints==3.13.9,sphinx-basic-ng==1.0.0b2,sphinx-copybutton==0.5.2,sphinx-inline-tabs==2025.12.21.14,sphinx-issues==6.0.0,sphinxcontrib-applehelp==2.0.0,sphinxcontrib-devhelp==2.0.0,sphinxcontrib-htmlhelp==2.1.0,sphinxcontrib-jsmath==1.0.1,sphinxcontrib-mermaid==2.1.1,sphinxcontrib-qthelp==2.0.0,sphinxcontrib-serializinghtml==2.0.0,towncrier==26.9.0,typing-extensions==4.16.0,urllib3==2.8.0,uv==0.13.0,virtualenv==21.14.6
+2026-10-17T00:35:56.1476819Z docs: commands[0]> uv tool run --python 3.14 --from 'proselint>=0.16' proselint check docs
+2026-10-17T00:35:56.5951860Z Installed 3 packages in 4ms
+2026-10-17T00:36:01.1580949Z docs: exit 1 (4.39 seconds) /home/runner/work/build/build> sphinx-build -W -n -b html docs /home/runner/work/build/build/.tox/docs/tmp/html pid=3191
+2026-10-17T00:36:01.1619959Z   docs: FAIL code 1 (5.03=setup[0.02]+cmd[0.62,4.39] seconds)
+2026-10-17T00:36:01.1620420Z   evaluation failed :( (5.09 seconds)

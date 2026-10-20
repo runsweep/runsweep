@@ -3,6 +3,8 @@
 package pypi
 
 import (
+	"maps"
+	"path"
 	"regexp"
 	"slices"
 	"strconv"
@@ -79,8 +81,14 @@ type section struct {
 	poWant   int
 	poOpen   bool
 	poNames  map[string]bool
-	setup    bool   // a Python setup action: needs no full list
-	pipArgs  string // the pip-install input of actions/setup-python
+	tox      bool            // the step's script runs tox (tox, python -m tox)
+	toxEnv   map[string]bool // tox environments that ran: true once a listing of every package was read
+	toxWait  map[string]bool // a tox 4 freeze> line whose listing has not been read yet
+	toxSetup bool            // inside a tox action that sets an environment up: the listing covers its installer output
+	toxCmds  []string        // the commands tox ran (commands[N]>, run-test:): installs there need their own output
+	scratch  *section        // takes the installer output of tox setup actions
+	setup    bool            // a Python setup action: needs no full list
+	pipArgs  string          // the pip-install input of actions/setup-python
 	hdr      string
 	echoText []string
 }
@@ -112,6 +120,7 @@ func (s *section) setCmd() {
 		s.Cmd = strings.Join(s.echoText, "\n")
 	}
 	s.Python = s.Python || workflow.HasPyTool(s.Cmd)
+	s.tox = countTox(s.Cmd) > 0
 }
 
 func (s *section) finish() Section {
@@ -134,9 +143,20 @@ func (s *section) finish() Section {
 		}
 		script = "pip install " + s.pipArgs // setup-python installs its pip-install input like a step would
 	}
+	// tox is read from its listings: every environment that ran printed one, tox's output is not
+	// hidden, and the commands tox ran are judged like the step's own
+	toxOK := false
+	if len(s.toxEnv) > 0 {
+		script += "\n" + strings.Join(s.toxCmds, "\n")
+		toxOK = !slices.Contains(slices.Collect(maps.Values(s.toxEnv)), false) && !s.envQuiet && !envQuiet(script) &&
+			!quietFor(script, s.pwsh, countTox)
+		if !toxOK {
+			out.Opaque = "tox"
+		}
+	}
 	cmds, dynamic, named := 0, false, 0
 	for _, in := range workflow.PyInstalls(script) {
-		if in.Opaque && out.Opaque == "" {
+		if in.Opaque && out.Opaque == "" && (!toxOK || !toxRun(in)) {
 			out.Opaque = in.Tool
 		}
 		if !in.Opaque {
@@ -175,10 +195,10 @@ func (s *section) finish() Section {
 
 var (
 	quotedRe   = regexp.MustCompile(`"[^"]*"|'[^']*'`)
-	envQuietRe = regexp.MustCompile(`(?:^|[\s;&|(])(?:UV|PIP)_QUIET(?:=|:\s*)["']?([^\s"';&|]*)`)
+	envQuietRe = regexp.MustCompile(`(?:^|[\s;&|(])(?:UV|PIP|TOX)_QUIET(?:=|:\s*)["']?([^\s"';&|]*)`)
 )
 
-// envQuiet reports whether text sets UV_QUIET or PIP_QUIET to something other than off.
+// envQuiet reports whether text sets UV_QUIET, PIP_QUIET or TOX_QUIET to something other than off.
 func envQuiet(text string) bool {
 	for _, m := range envQuietRe.FindAllStringSubmatch(text, -1) {
 		if v := strings.ToLower(m[1]); v != "" && v != "0" && v != "false" {
@@ -552,7 +572,10 @@ func joinLines(script string) string {
 // quietOutput reports whether an install command of the script asks for quiet output (a quiet
 // flag) or hides it (stdout redirected, piped into anything but tee, captured by $(…), or the same
 // done to its enclosing group, if-block or loop).
-func quietOutput(script string, pwsh bool) bool {
+func quietOutput(script string, pwsh bool) bool { return quietFor(script, pwsh, countInstalls) }
+
+// quietFor is quietOutput for the commands count counts (installs, or tox runs).
+func quietFor(script string, pwsh bool, count func(string) int) bool {
 	script = joinLines(script)
 	segs, quiet := segments(script, pwsh || pwshTextRe.MatchString(script))
 	if quiet {
@@ -580,7 +603,7 @@ func quietOutput(script string, pwsh bool) bool {
 			if textWords[firstWord(el)] {
 				continue
 			}
-			n := countInstalls(el)
+			n := count(el)
 			if n == 0 {
 				continue
 			}
@@ -590,7 +613,7 @@ func quietOutput(script string, pwsh bool) bool {
 			}
 		}
 	}
-	return found < countInstalls(script) // an install no segment accounts for: assume the worst
+	return found < count(script) // a command no segment accounts for: assume the worst
 }
 
 // alternatives counts install commands that may not run: a script with a single if/else/fi runs
@@ -687,10 +710,26 @@ func ParseLog(log string) Log {
 				cur.pipArgs = m[1]
 			}
 		}
+		// tox lines: env prefixes, listings (an empty one ends in ":"), summaries
+		if strings.Contains(raw, ": ") || strings.Contains(raw, ":\x1b") || strings.HasSuffix(raw, ":") {
+			if l.toxLine(cur, sgrRe.ReplaceAllString(tsRe.ReplaceAllString(raw, ""), ""), n) {
+				continue
+			}
+		}
 		if !containsAny(raw, lineLiterals) {
 			continue
 		}
 		line := sgrRe.ReplaceAllString(tsRe.ReplaceAllString(raw, ""), "")
+		if cur.toxSetup {
+			// tox's own installer output (tox -vv): its versions are installs, its completeness is
+			// the listing's; evidence of an unlisted install (build dependencies) still counts
+			if cur.scratch == nil {
+				cur.scratch = &section{rasTop: map[string]int{}}
+			}
+			l.parseLine(cur.scratch, line, n)
+			cur.Python, cur.partial = true, cur.partial || cur.scratch.partial
+			continue
+		}
 		l.parseLine(cur, line, n)
 	}
 	l.Sections = append(l.Sections, cur.finish())
@@ -852,4 +891,147 @@ func splitFile(f string) (name, ver string, ok bool) {
 	}
 	base := strings.TrimSuffix(strings.TrimSuffix(f, ".tar.gz"), ".zip")
 	return splitNameVersion(base)
+}
+
+var (
+	// tox 4: "<env>: <action>> <command>"; tox -vv puts "<ms> <level> " before the action and a
+	// " [file:line]" source after the line
+	toxActRe = regexp.MustCompile(`^([.\w+-]+): (\d+ [A-Z] )?([a-z_-]+(?:\[\d+\])?)(?: [^>]*)?> (.*)$`)
+	toxEnvRe = regexp.MustCompile(`^([.\w+-]+):(?: (\d+ [A-Z] )?(.*))?$`)
+	toxSrcRe = regexp.MustCompile(` \[[\w/.-]+:\d+\]$`)
+	// the result of an environment, tox 4 and tox 3
+	toxSumRe = regexp.MustCompile(`^\s*(?:ERROR:\s+)?([.\w+-]+): (?:OK|FAIL|commands succeeded|commands failed)\b`)
+	// tox 3: "<env> <action>: <text>"
+	tox3Re = regexp.MustCompile(`^([.\w+-]+) (create|recreate|installdeps|inst|inst-nodeps|develop-inst|develop-inst-nodeps|develop-inst-noop|installed|run-test-pre|run-test|run-test-post):(?: (.*))?$`)
+	// a listing entry for a local directory installed in editable mode
+	toxEditableRe = regexp.MustCompile(`^-e (?:/|\.|file:|[A-Za-z]:[\\/])`)
+	// tox 4 actions that install nothing in their environment: after the listing they leave it whole
+	toxReadOnly = map[string]bool{"freeze": true, "exit": true, "_exit": true, "_optional_hooks": true,
+		"get_requires_for_build_sdist": true, "get_requires_for_build_wheel": true, "get_requires_for_build_editable": true,
+		"prepare_metadata_for_build_wheel": true, "prepare_metadata_for_build_editable": true,
+		"build_sdist": true, "build_wheel": true, "build_editable": true}
+)
+
+// toxRun reports whether a command runs tox itself. uvx tox, uv tool run tox and pipx run tox are
+// not: they install tox's own environment, and print nothing when it comes from their cache.
+func toxRun(in workflow.PyInstall) bool { return in.Tool == "tox" || in.Tool == "python -m tox" }
+
+func countTox(text string) int {
+	n := 0
+	for _, in := range workflow.PyInstalls(text) {
+		if toxRun(in) {
+			n++
+		}
+	}
+	return n
+}
+
+// ran records a tox environment that ran; it needs a listing.
+func (s *section) ran(env string) {
+	if s.toxEnv == nil {
+		s.toxEnv, s.toxWait = map[string]bool{}, map[string]bool{}
+	}
+	if _, ok := s.toxEnv[env]; !ok {
+		s.toxEnv[env] = false
+	}
+	s.Python = true
+}
+
+// toxLine reads a tox line: an action, a listing or a result. Outside a step that runs tox, only
+// known tox 4 actions start reading (any "word: x> y" line would otherwise).
+func (l *Log) toxLine(s *section, line string, n int) bool {
+	if m := toxActRe.FindStringSubmatch(line); m != nil {
+		env, act, cmd := m[1], m[3], m[4]
+		cmds := strings.HasPrefix(act, "commands")
+		if !s.tox && s.toxEnv == nil && !cmds && !toxReadOnly[act] && act != "venv" && !strings.HasPrefix(act, "install_") {
+			return false
+		}
+		s.ran(env)
+		l.Calls = true
+		switch {
+		case act == "exit": // tox -vv and failures: the end of a command, not a new one
+		case act == "freeze":
+			s.toxWait[env], s.toxSetup = true, true
+		case cmds:
+			if m[2] != "" {
+				cmd = toxSrcRe.ReplaceAllString(cmd, "")
+			}
+			s.toxCmds = append(s.toxCmds, cmd)
+			delete(s.toxWait, env)
+			s.toxSetup = false
+		default:
+			delete(s.toxWait, env)
+			s.toxSetup = true
+			if !toxReadOnly[act] {
+				s.toxEnv[env] = false // installs after the listing: not in it
+			}
+		}
+		return true
+	}
+	if m := toxSumRe.FindStringSubmatch(line); m != nil && (s.tox || s.toxEnv != nil) {
+		s.ran(m[1])
+		delete(s.toxWait, m[1])
+		s.toxSetup = false
+		return true
+	}
+	if m := tox3Re.FindStringSubmatch(line); m != nil {
+		env, act, rest := m[1], m[2], m[3]
+		s.ran(env)
+		l.Calls = true
+		switch act {
+		case "installed":
+			s.toxEnv[env] = l.toxListing(rest, n, line)
+			s.toxSetup = false
+		case "run-test-pre", "run-test", "run-test-post":
+			if _, c, ok := strings.Cut(rest, " | "); ok {
+				s.toxCmds = append(s.toxCmds, c)
+			}
+			s.toxSetup = false
+		default:
+			s.toxEnv[env] = false
+			s.toxSetup = true
+		}
+		return true
+	}
+	if m := toxEnvRe.FindStringSubmatch(line); m != nil && s.toxWait[m[1]] {
+		// the line after "<env>: freeze>" from the same environment is its listing
+		list := m[3]
+		if m[2] != "" {
+			list = toxSrcRe.ReplaceAllString(list, "")
+		}
+		delete(s.toxWait, m[1])
+		s.toxEnv[m[1]] = l.toxListing(list, n, line)
+		return true
+	}
+	return false
+}
+
+// toxListing reads a comma-separated freeze listing: name==version entries are installs, a local
+// project (name @ file://…, -e <path>) is skipped, anything else makes the listing not complete.
+func (l *Log) toxListing(list string, n int, line string) bool {
+	list = strings.TrimSpace(list)
+	if list == "" {
+		return true // an environment with nothing installed
+	}
+	ok := true
+	for _, e := range strings.Split(list, ",") {
+		e = strings.TrimSpace(e)
+		if name, ver, found := strings.Cut(e, "=="); found && !strings.ContainsAny(name, " @;") && !strings.ContainsAny(ver, " =@;") {
+			ok = l.add(name, ver, n, line) && ok
+			continue
+		}
+		if name, url, found := strings.Cut(e, " @ "); found && strings.HasPrefix(url, "file://") && pep.ValidName(name) {
+			// a local file or directory; a file named name-version is that version
+			if fn, ver, split := splitFile(path.Base(url)); split && pep.Name(fn) == pep.Name(name) {
+				l.add(name, ver, n, line)
+			}
+			continue
+		}
+		if toxEditableRe.MatchString(e) {
+			continue
+		}
+		l.Unparsed = append(l.Unparsed, Install{Name: nameRe.FindString(e), Line: n, Text: line})
+		ok = false
+	}
+	return ok
 }
