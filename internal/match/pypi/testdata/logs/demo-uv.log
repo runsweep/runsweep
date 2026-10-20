@@ -1,0 +1,13 @@
+2026-10-20T09:14:36.1454610Z ##[group]Run uv sync --frozen
+2026-10-20T09:14:36.1455124Z [36;1muv sync --frozen[0m
+2026-10-20T09:14:36.1631689Z shell: /usr/bin/bash -e {0}
+2026-10-20T09:14:36.1632488Z env:
+2026-10-20T09:14:36.1632942Z   UV_PYTHON_INSTALL_DIR: /home/runner/work/_temp/uv-python-dir
+2026-10-20T09:14:36.1633564Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+2026-10-20T09:14:36.1634046Z ##[endgroup]
+2026-10-20T09:14:36.1847003Z Using CPython 3.12.3 interpreter at: /usr/bin/python3
+2026-10-20T09:14:36.1847830Z Creating virtual environment at: .venv
+2026-10-20T09:14:36.2361855Z Prepared 1 package in 50ms
+2026-10-20T09:14:36.2372288Z Installed 1 package in 1ms
+2026-10-20T09:14:36.2373296Z  + six==1.17.0
+2026-10-20T09:14:36.5424620Z Post job cleanup.
