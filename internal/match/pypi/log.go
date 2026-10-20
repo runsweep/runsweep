@@ -766,7 +766,7 @@ func versionText(v pep.Version) string {
 func (l *Log) parseLine(cur *section, line string, n int) {
 	install := func() { cur.Python, l.Calls, cur.sawOut = true, true, true }
 	switch {
-	case setupUVRe.MatchString(line):
+	case setupUVRe.MatchString(line), strings.HasPrefix(line, "Terminate orphan process: "): // the runner names a process it kills
 	case pipDoneRe.MatchString(line):
 		install()
 		cur.rasTail = false

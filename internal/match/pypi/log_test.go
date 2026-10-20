@@ -633,6 +633,7 @@ func TestParseLogTox(t *testing.T) {
 		"empty listing":        {step("tox -e py", slices.Concat(listed, []string{"lint: freeze> pip freeze", "lint: ", "lint: OK"})...), true, ""},
 		"local project":        {step("tox -e py", with(3, "py: freeze> pip freeze", "py: -e /home/runner/work/a/a,demo @ file:///home/runner/work/a/a")...), true, ""},
 		"make runs tox listed": {step("make test", listed...), true, ""},
+		"orphan tox killed":    {step("tox -e py", slices.Concat(listed, []string{"Cleaning up orphan processes", "Terminate orphan process: pid (2127) (tox)"})...), true, ""},
 		"no listing":           {step("tox -e py", without(2)...), false, "tox"},
 		"no freeze":            {step("tox -e py", without(1)...), false, "tox"},
 		"listing late":         {step("tox -e py", slices.Concat(listed[:2], []string{"py: commands[0]> pytest"}, listed[2:])...), false, "tox"},
