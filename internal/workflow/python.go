@@ -405,9 +405,10 @@ func classify(tool string, args []string) (PyInstall, bool) {
 		case s == "install":
 			in := PyInstall{Tool: "pip install"}
 			in.Pkgs, in.Dynamic = pyPkgs(pos[1:])
-			in.Named = len(in.Pkgs) == len(pos[1:]) && !slices.ContainsFunc(args, func(a string) bool {
-				// -r, -e, a short-flag cluster holding them, --upgrade-strategy (eager upgrades print more)
+			in.Named = len(in.Pkgs) > 0 && len(in.Pkgs) == len(pos[1:]) && !slices.ContainsFunc(args, func(a string) bool {
+				// -r, -e, a short-flag cluster holding them, --upgrade-strategy (eager upgrades print more), --group (prints its own listing)
 				return strings.HasPrefix(a, "--requirement") || strings.HasPrefix(a, "--editable") || strings.HasPrefix(a, "--upgrade-strategy") ||
+					strings.HasPrefix(a, "--group") || strings.HasPrefix(a, "--only-group") ||
 					strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") && strings.ContainsAny(a, "re")
 			})
 			return in, true
