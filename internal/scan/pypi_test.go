@@ -228,10 +228,20 @@ func TestScanPyPITox(t *testing.T) {
 		status model.Status
 		note   string
 	}{
-		"listed clean":          {toxLog("litellm==1.82.9,pytest==8.0.0"), model.Clean, ""},
-		"listed bad":            {toxLog("litellm==1.82.8,pytest==8.0.0"), model.Affected, "litellm==1.82.8 in job log"},
-		"bad entry shape":       {toxLog("litellm @ https://example.com/litellm-1.82.8.whl"), model.Unchecked, "unparsed install line for litellm"},
-		"no listing":            {head + pyStep("tox -e py", "py: install_deps> python -I -m pip install litellm", "  py: OK"), model.Unchecked, "Python install output not visible: tox"},
+		"listed clean":    {toxLog("litellm==1.82.9,pytest==8.0.0"), model.Clean, ""},
+		"listed bad":      {toxLog("litellm==1.82.8,pytest==8.0.0"), model.Affected, "litellm==1.82.8 in job log"},
+		"bad entry shape": {toxLog("litellm @ https://example.com/litellm-1.82.8.whl"), model.Unchecked, "unparsed install line for litellm"},
+		"no listing":      {head + pyStep("tox -e py", "py: install_deps> python -I -m pip install litellm", "  py: OK"), model.Unchecked, "Python install output not visible: tox"},
+		// review C2, C3, I3
+		"sdist package": {head + pyStep("tox -e py", "py: install_deps> python -I -m pip install pytest",
+			"py: install_package> python -I -m pip install --force-reinstall --no-deps /w/.tox/.tmp/package/1/a-1.0.tar.gz",
+			"py: freeze> python -m pip freeze --all", "py: a @ file:///w/.tox/.tmp/package/1/a-1.0.tar.gz,pytest==8.0.0", "py: commands[0]> pytest", "  py: OK (1.00 seconds)"), model.Unchecked, "not visible: tox"},
+		"custom freeze": {head + pyStep("tox -e py", "py: install_deps> python -I -m pip install litellm==1.82.8 pytest",
+			"py: freeze> python -m pip freeze --exclude litellm", "py: pytest==8.0.0", "py: commands[0]> pytest", "  py: OK (1.00 seconds)"), model.Unchecked, "not visible: tox"},
+		"custom freeze lists bad": {head + pyStep("tox -e py", "py: freeze> python -m pip freeze", "py: litellm==1.82.8", "  py: OK"), model.Affected, "litellm==1.82.8 in job log"},
+		"colon env": {head + pyStep("tox -e py", "py: install_deps> python -I -m pip install pytest",
+			"py: freeze> python -m pip freeze --all", "py: pytest==8.0.0", "py: commands[0]> pytest",
+			"docs:html: install_deps> python -I -m pip install litellm", "docs:html: commands[0]> sphinx-build", "  py: OK (1.00 seconds)", "  docs:html: OK (1.00 seconds)"), model.Unchecked, "not visible: tox"},
 		"quiet pip in commands": {toxLog("litellm==1.82.9", "py: commands[1]> pip install -q -r extra.txt"), model.Unchecked, "Python install output incomplete in step: tox -e py"},
 	} {
 		if fd := scanAny(t, pyFx(steps, c.log), pypiOnly); fd.Status != c.status || c.note != "" && !hasNote(fd, c.note) && !hasEvidence(fd, c.note) {
