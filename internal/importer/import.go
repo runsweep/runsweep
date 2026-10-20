@@ -172,7 +172,7 @@ func (c *Client) Import(ctx context.Context, o Options) ([]byte, error) {
 			why := ""
 			if len(pt.Times) == 0 && len(pt.Published) == 0 { // 404 or no versions left
 				why = "removed from npm, versions unknown"
-			} else if f.expand(name, pt); len(f.npm[name]) == 0 {
+			} else if f.expand(name, pt); f.emptyRange(name, pt) {
 				why = "no registry version falls in the OSV range"
 			}
 			if why == "" {
