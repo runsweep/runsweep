@@ -703,3 +703,20 @@ func TestParseLogTox(t *testing.T) {
 		t.Errorf("unparsed: %+v", l.Unparsed)
 	}
 }
+
+func TestWheelOnly(t *testing.T) {
+	for cmd, want := range map[string]bool{
+		"python -I -m pip install --force-reinstall --no-deps /w/.tox/.tmp/package/1/a-1.0-py3-none-any.whl": true,
+		"python -I -m pip install --no-deps /w/.tox/.tmp/package/1/a-1.0.tar.gz":                             false,
+		"pip install -e /w":                                      false,
+		"pip install -e/w a-1.0-py3-none-any.whl":                false,
+		"pip install -rreq.txt a-1.0-py3-none-any.whl":           false,
+		"pip install --requirement=r.txt a-1.0-py3-none-any.whl": false,
+		"pip install --editable=/w":                              false,
+		"pip install --no-deps":                                  false,
+	} {
+		if got := wheelOnly(cmd); got != want {
+			t.Errorf("wheelOnly(%q) = %v, want %v", cmd, got, want)
+		}
+	}
+}
