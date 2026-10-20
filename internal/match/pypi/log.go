@@ -1058,7 +1058,8 @@ func wheelOnly(cmd string) bool {
 	n := 0
 	for _, a := range f[i+1:] {
 		switch {
-		case a == "-e" || strings.HasPrefix(a, "--editable"):
+		case strings.HasPrefix(a, "--editable") || strings.HasPrefix(a, "--requirement"),
+			!strings.HasPrefix(a, "--") && strings.HasPrefix(a, "-") && strings.ContainsAny(a, "er"): // -e/w, -rreq.txt, clusters
 			return false
 		case strings.HasPrefix(a, "-"):
 		case strings.HasSuffix(strings.Trim(a, `'"`), ".whl"):
