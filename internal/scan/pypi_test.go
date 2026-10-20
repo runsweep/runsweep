@@ -187,3 +187,29 @@ func TestScanPyPIFinalReview(t *testing.T) {
 		}
 	}
 }
+
+// TestScanPyPINoPackages: a pip install that names no package is never credited with a listing.
+func TestScanPyPINoPackages(t *testing.T) {
+	run := func(script string) string {
+		return "      - run: |\n          " + strings.ReplaceAll(script, "\n", "\n          ") + "\n"
+	}
+	sp := "      - uses: actions/setup-python@v5\n"
+	setupLog := pyStep("actions/setup-python@v5")
+	ras := "Requirement already satisfied: pip in /x (25.3)"
+	for name, c := range map[string]struct{ script, listing string }{
+		"group no output":           {"pip install --group test", ""},
+		"quiet config":              {"pip config set global.quiet true\npip install --group test", ""},
+		"upgrade pip first":         {"python -m pip install --upgrade pip\npip install --group test", ras},
+		"group and -r, one listing": {"pip install --group test\npip install -r requirements.txt", "Successfully installed six-1.17.0"},
+		"constraints only":          {"pip install -c c.txt", ""},
+	} {
+		var out []string
+		if c.listing != "" {
+			out = []string{c.listing}
+		}
+		f := pyFx(sp+run(c.script), setupLog+pyStep(c.script, out...))
+		if fd := scanAny(t, f, pypiOnly); fd.Status == model.Clean {
+			t.Errorf("%s: CLEAN (%+v)", name, fd)
+		}
+	}
+}
