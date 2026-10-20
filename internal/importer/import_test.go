@@ -444,3 +444,60 @@ func TestImportPyPI(t *testing.T) {
 		t.Errorf("bad name: %v", err)
 	}
 }
+
+// twoRecords serves MAL-0000-A (lists 1.0.0) and MAL-0000-B (range only, the given events).
+func twoRecords(t *testing.T, events string, missing bool) *Client {
+	c, _ := fixtures(t, func(w http.ResponseWriter, r *http.Request) bool {
+		if missing && strings.HasPrefix(r.URL.Path, "/npm/") {
+			w.WriteHeader(http.StatusNotFound)
+			return true
+		}
+		pkg := `"package":{"ecosystem":"npm","name":"eslint-validator"}`
+		switch r.URL.Path {
+		case "/osv/v1/vulns/MAL-0000-A":
+			_, _ = fmt.Fprintf(w, `{"id":"MAL-0000-A","affected":[{%s,"versions":["1.0.0"]}]}`, pkg)
+		case "/osv/v1/vulns/MAL-0000-B":
+			_, _ = fmt.Fprintf(w, `{"id":"MAL-0000-B","affected":[{%s,"ranges":[{"type":"SEMVER","events":[%s]}]}]}`, pkg, events)
+		default:
+			return false
+		}
+		return true
+	})
+	return c
+}
+
+// Issue #13: a range-only record widens on its own, whatever other records list.
+func TestImportRangeOnlyRecordWidensDespiteListedVersions(t *testing.T) {
+	for _, ids := range [][]string{{"MAL-0000-A", "MAL-0000-B"}, {"MAL-0000-B", "MAL-0000-A"}} {
+		c := twoRecords(t, `{"introduced":"5.0.0"},{"last_affected":"5.1.0"}`, false)
+		out, _, err := importWith(t, c, Options{IDs: ids, Since: importNow.Add(-time.Hour), Until: importNow})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(out), `{name: "eslint-validator", versions: ["*"]}`) {
+			t.Errorf("%v:\n%s", ids, out)
+		}
+	}
+}
+
+func TestImportRangeOnlyRecordHitsUnionWithListed(t *testing.T) {
+	c := twoRecords(t, `{"introduced":"1.0.3"},{"last_affected":"1.0.4"}`, false)
+	out, _, err := importWith(t, c, Options{IDs: []string{"MAL-0000-A", "MAL-0000-B"}, KeepAll: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `{name: "eslint-validator", versions: ["1.0.0", "1.0.3", "1.0.4"]}`) {
+		t.Fatalf("%s", out)
+	}
+}
+
+func TestImportRemovedPackageListedPlusRangeOnlyIsEveryVersion(t *testing.T) {
+	c := twoRecords(t, `{"introduced":"0"}`, true)
+	out, _, err := importWith(t, c, Options{IDs: []string{"MAL-0000-A", "MAL-0000-B"}, Since: importNow.Add(-time.Hour), Until: importNow})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `{name: "eslint-validator", versions: ["*"]}`) {
+		t.Fatalf("%s", out)
+	}
+}

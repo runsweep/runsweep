@@ -3,6 +3,7 @@ package importer
 import (
 	"cmp"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strconv"
@@ -20,12 +21,13 @@ type found struct {
 	notes   []string                   // YAML comment lines (without "# ")
 	warns   []string                   // stderr warnings
 	refs    []string
-	ranges  map[string][]segment // package -> OSV range spans to fill from the registry
-	seen    map[string]bool      // OSV ids already added
+	ranges  map[string][]segment   // package -> OSV range spans to fill from the registry
+	only    map[string][][]segment // package -> spans of each range-only record (no versions)
+	seen    map[string]bool        // OSV ids already added
 }
 
 func newFound() *found {
-	return &found{ranges: map[string][]segment{}, npm: map[string]map[string]bool{}, pypi: map[string]map[string]bool{}, actions: map[string]map[string]bool{}, seen: map[string]bool{}}
+	return &found{only: map[string][][]segment{}, ranges: map[string][]segment{}, npm: map[string]map[string]bool{}, pypi: map[string]map[string]bool{}, actions: map[string]map[string]bool{}, seen: map[string]bool{}}
 }
 
 // both records the same text as a YAML note and a warning.
@@ -65,6 +67,7 @@ func (f *found) addVuln(v *Vuln) bool {
 			}
 			if len(a.Versions) == 0 {
 				if len(segs) > 0 { // the registry fills the versions in
+					f.only[name] = append(f.only[name], segs)
 					if f.npm[name] == nil {
 						f.npm[name] = map[string]bool{}
 					}
@@ -234,6 +237,21 @@ func sortedVersions(m map[string]bool) []string {
 	}
 	sort.Slice(out, func(i, j int) bool { return versionLess(out[i], out[j]) })
 	return out
+}
+
+// emptyRange reports whether some range-only record of name has no registry
+// version in its spans (D-007: that record alone widens the package to "*").
+func (f *found) emptyRange(name string, pt PkgTimes) bool {
+	for _, segs := range f.only[name] {
+		hit := func(v string) bool {
+			_, ok := triple(v)
+			return ok && validVersion(v) && slices.ContainsFunc(segs, func(s segment) bool { return s.has(v) })
+		}
+		if !slices.ContainsFunc(slices.Collect(maps.Keys(pt.Times)), hit) && !slices.ContainsFunc(slices.Collect(maps.Keys(pt.Published)), hit) {
+			return true
+		}
+	}
+	return false
 }
 
 // expand adds to f.npm[name] every registry version inside one of its OSV
