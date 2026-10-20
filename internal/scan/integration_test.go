@@ -17,14 +17,14 @@ import (
 	"gopkg.in/dnaeon/go-vcr.v4/pkg/recorder"
 )
 
-// TestDemoCassette replays a real scan of runsweep-demo (recorded under its old owner dmitriy86it) against examples/drill.yaml.
-// Record with: RUNSWEEP_RECORD=1 GITHUB_TOKEN=$(gh auth token) go test ./internal/scan -run Demo
-func TestDemoCassette(t *testing.T) {
+// cassetteClient returns a client that replays (or, with RUNSWEEP_RECORD=1, records) testdata/cassettes/<name>.yaml.
+func cassetteClient(t *testing.T, name string) *gh.Client {
+	t.Helper()
 	mode := recorder.ModeReplayOnly
 	if os.Getenv("RUNSWEEP_RECORD") == "1" {
 		mode = recorder.ModeRecordOnly
 	}
-	r, err := recorder.New("testdata/cassettes/demo",
+	r, err := recorder.New("testdata/cassettes/"+name,
 		recorder.WithMode(mode),
 		recorder.WithSkipRequestLatency(true),
 		recorder.WithMatcher(func(r *http.Request, i cassette.Request) bool {
@@ -55,12 +55,19 @@ func TestDemoCassette(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = r.Stop() }()
+	t.Cleanup(func() { _ = r.Stop() })
 	// The same client serves API calls and the signed log download, so both are recorded.
 	c, err := gh.New(&http.Client{Transport: r}, os.Getenv("GITHUB_TOKEN"), "")
 	if err != nil {
 		t.Fatal(err)
 	}
+	return c
+}
+
+// TestDemoCassette replays a real scan of runsweep-demo (recorded under its old owner dmitriy86it) against examples/drill.yaml.
+// Record with: RUNSWEEP_RECORD=1 GITHUB_TOKEN=$(gh auth token) go test ./internal/scan -run Demo
+func TestDemoCassette(t *testing.T) {
+	c := cassetteClient(t, "demo")
 	inc, err := incident.Load("../../examples/drill.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -108,3 +115,38 @@ func TestDemoCassette(t *testing.T) {
 var match = cassette.NewDefaultMatcher(cassette.WithIgnoreAuthorization())
 
 func isBlob(u *url.URL) bool { return strings.HasSuffix(u.Hostname(), ".blob.core.windows.net") }
+
+// TestDemoPyPICassette replays a real scan of the Python jobs of runsweep/runsweep-demo against examples/drill-pypi.yaml.
+// Record with: RUNSWEEP_RECORD=1 GITHUB_TOKEN=$(gh auth token) go test ./internal/scan -run DemoPyPI
+func TestDemoPyPICassette(t *testing.T) {
+	c := cassetteClient(t, "demo-pypi")
+	inc, err := incident.Load("../../examples/drill-pypi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func(n int) { concurrency = n }(concurrency)
+	concurrency = 1
+	res, err := Run(context.Background(), c, inc, Options{Repos: []string{"runsweep/runsweep-demo"}, Lookback: 7 * 24 * time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]model.Status{
+		"pip": model.Affected, "uv": model.Affected, "poetry": model.Affected,
+		"pip-quiet": model.Possible, "tox": model.Possible,
+	}
+	got := map[string]model.Status{}
+	for _, f := range res.Findings {
+		if strings.HasSuffix(f.Run.Workflow, "build.yml") {
+			t.Errorf("npm demo job reported for PyPI: %+v", f)
+		}
+		got[f.Run.Job] = f.Status
+	}
+	if len(got) != len(want) {
+		t.Fatalf("python.yml findings = %v, want %v", got, want)
+	}
+	for j, w := range want {
+		if got[j] != w {
+			t.Errorf("job %s = %v, want %v", j, got[j], w)
+		}
+	}
+}

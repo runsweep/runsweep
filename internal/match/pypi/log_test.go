@@ -528,3 +528,17 @@ const (
 	upgrade = "python -m pip install --upgrade pip"
 	starter = upgrade + "\npip install flake8 pytest\nif [ -f requirements.txt ]; then pip install -r requirements.txt; fi"
 )
+
+func TestParseLogDemoExcerpts(t *testing.T) {
+	// real job-log excerpts of runsweep/runsweep-demo: each tool lists six 1.17.0 in a complete Python section
+	for _, n := range []string{"demo-pip.log", "demo-uv.log", "demo-poetry.log"} {
+		b, err := os.ReadFile("testdata/logs/" + n) //nolint:gosec // G304: test fixture path
+		if err != nil {
+			t.Fatal(err)
+		}
+		l := ParseLog(string(b))
+		if installs(l)["six"] != "1.17" {
+			t.Errorf("%s: %v", n, installs(l))
+		}
+	}
+}
