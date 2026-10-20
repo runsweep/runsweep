@@ -132,7 +132,7 @@ func TestDemoPyPICassette(t *testing.T) {
 	}
 	want := map[string]model.Status{
 		"pip": model.Affected, "uv": model.Affected, "poetry": model.Affected,
-		"pip-quiet": model.Possible, "tox": model.Possible,
+		"pip-quiet": model.Possible, "tox": model.Affected, // tox lists six 1.17.0 after its freeze> line
 	}
 	got := map[string]model.Status{}
 	for _, f := range res.Findings {

@@ -71,7 +71,7 @@ Malicious code can spread through caches, artifacts, self-hosted runners and wor
 runsweep sees what job logs, workflow files and lockfiles show; some installs leave no trace there. Read the limits before you close the incident.
 
 <details>
-<summary>Limits · 26 things runsweep cannot see</summary>
+<summary>Limits · 28 things runsweep cannot see</summary>
 
 - GitHub deletes workflow runs, checks and logs after the repository's retention period (default 90 days). Older runs cannot be checked and show as UNCHECKED or are absent.
 - Which secrets a job could read is derived from the workflow file at the run's commit; GitHub's API does not expose it directly.
@@ -95,7 +95,9 @@ runsweep sees what job logs, workflow files and lockfiles show; some installs le
 - Runs that start after the window end are not scanned.
 - GitHub Enterprise is not supported; OIDC trust in nested reusable workflows is not resolved.
 - PyPI: requirements and constraints files (== pins), uv.lock, poetry.lock, pylock.toml and Pipfile.lock are read; pdm.lock is not. Files included with -r or -c are read only when their name looks like a requirements or constraints file.
-- PyPI installs are proven by pip, uv, poetry and pipx lines in the job log. A step whose output does not list every installed version (quiet or redirected output, uv run that creates or syncs the environment, build dependencies, a restored venv), wrappers (tox, nox, pre-commit, hatch, pdm, pipenv, pipx, uvx, conda, python -m build, pip wheel or download) and tool words runsweep cannot place in a command make the job UNCHECKED, or POSSIBLE when a lockfile anywhere in the repository pins a bad version; lockfiles are not linked to jobs.
+- PyPI installs are proven by pip, uv, poetry and pipx lines in the job log. A step whose output does not list every installed version (quiet or redirected output, uv run that creates or syncs the environment, build dependencies, a restored venv), wrappers (nox, pre-commit, hatch, pdm, pipenv, pipx, uvx, conda, python -m build, pip wheel or download) and tool words runsweep cannot place in a command make the job UNCHECKED, or POSSIBLE when a lockfile anywhere in the repository pins a bad version; lockfiles are not linked to jobs.
+- tox is read from the package listing it prints for each environment (tox 4 after freeze>, tox 3 installed:); an environment without a listing, quiet or redirected tox output, or an install in tox commands without its own listing leaves the job UNCHECKED. tox run through uvx, uv tool run or pipx run stays UNCHECKED: tox's own environment is not listed.
+- nox hides pip output unless run with --verbose; such jobs stay UNCHECKED — run nox --verbose or pip freeze in the session.
 - A venv or site-packages restored from a cache shows only through "Requirement already satisfied" lines; a uv or poetry environment restored from a cache lists only what changed. Installs inside docker build, containers and scripts that silence all output are not seen. Python scripts (python script.py, code fed to python on stdin) are judged by their output only: one that installs packages without printing install lines is not seen. Neither are build tools that call pip internally without a Python tool word in the job (sam build) nor scripts that install silently, with no install output.
 - PyPI version ranges (>=1,<2) are not compared.
 - npm, PyPI and GitHub Actions only.

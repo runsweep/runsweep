@@ -1,0 +1,16 @@
+SYNTHETIC excerpt (no tox 3 job log found in the noise data): tox 3.28 output shape, written by hand
+2026-03-02T10:00:00.0000000Z ##[group]Run tox -e py38
+2026-03-02T10:00:00.0000001Z [36;1mtox -e py38[0m
+2026-03-02T10:00:00.0000002Z shell: /usr/bin/bash -e {0}
+2026-03-02T10:00:00.0000003Z ##[endgroup]
+2026-03-02T10:00:01.0000000Z GLOB sdist-make: /home/runner/work/demo/demo/setup.py
+2026-03-02T10:00:02.0000000Z py38 create: /home/runner/work/demo/demo/.tox/py38
+2026-03-02T10:00:03.0000000Z py38 installdeps: pytest, six
+2026-03-02T10:00:04.0000000Z py38 inst: /home/runner/work/demo/demo/.tox/.tmp/package/1/demo-0.1.zip
+2026-03-02T10:00:05.0000000Z py38 installed: demo @ file:///home/runner/work/demo/demo/.tox/.tmp/package/1/demo-0.1.zip,iniconfig==2.0.0,packaging==24.0,pluggy==1.5.0,pytest==8.1.1,six==1.16.0,tomli==2.0.1
+2026-03-02T10:00:06.0000000Z py38 run-test-pre: PYTHONHASHSEED='1234'
+2026-03-02T10:00:06.1000000Z py38 run-test: commands[0] | pytest tests
+2026-03-02T10:00:07.0000000Z ============================= test session starts ==============================
+2026-03-02T10:00:08.0000000Z ___________________________________ summary ____________________________________
+2026-03-02T10:00:08.1000000Z   py38: commands succeeded
+2026-03-02T10:00:08.2000000Z   congratulations :)
